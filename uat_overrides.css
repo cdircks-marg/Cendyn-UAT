@@ -1,4 +1,4 @@
-html body {
+html {
   @media only screen and (max-width: 767px) {
     .notifications .countdown-promo .info {
       min-height: auto;
