@@ -121,21 +121,18 @@
 
       btn.addEventListener("click", function () {
         try {
-          // Turn off session UAT
           setEnabled(false);
 
-          // Clean up immediately
           stopObserver();
           removeCss();
           removeBadge();
 
           //******************************************
-          // Clean up HubSpot/header/body offset logic
           stopHeaderOffsetObserver();
           clearHeaderOffsets();
+          clearBodyTop();
           //******************************************
 
-          // Optional: remove UAT param from URL (no reload)
           var url = new URL(window.location.href);
           url.searchParams.delete("UAT");
           url.searchParams.delete("uat");
@@ -162,7 +159,7 @@
     };
 
     //******************************************
-    // HubSpot + Notifications logic (IMPORTANT: do NOT override/clear notifications unless HubSpot banner is OPEN)
+    // HubSpot + Notifications logic
 
     var getHeaderEl = function () {
       return document.querySelector("#header");
@@ -172,25 +169,22 @@
       return document.querySelector(".notifications");
     };
 
-    var getHubspotBannerEl = function () {
+    //******************************************
+    // CRITICAL FIX:
+    // Only treat as "HubSpot banner page" if the NON-MODAL overlay CTA container exists.
+    // This prevents hiding notifications on other pages where the top anchor exists globally.
+    var getHubspotBannerContainerEl = function () {
       var topAnchor = document.getElementById(HS_TOP_ANCHOR_ID);
       if (!topAnchor) return null;
 
-      // HubSpot injects multiple hs-overlay-cta-... divs. Ignore the MODAL popup.
-      var candidates = topAnchor.querySelectorAll('div[id^="hs-overlay-cta-"]');
+      // Find the top banner container (NOT the popup)
+      var el = topAnchor.querySelector(
+        'div[id^="hs-overlay-cta-"]:not([role="dialog"]):not([aria-modal="true"])'
+      );
 
-      for (var i = 0; i < candidates.length; i++) {
-        var el = candidates[i];
-
-        // Ignore modal popup wrapper
-        if (el.getAttribute("role") === "dialog") continue;
-        if (((el.getAttribute("aria-modal") || "") + "").toLowerCase() === "true") continue;
-
-        return el; // banner container (we validate open/closed via classes + height)
-      }
-
-      return null;
+      return el || null;
     };
+    //******************************************
 
     var ensureStyleTag = function () {
       var style = document.getElementById(HS_STYLE_ID);
@@ -207,16 +201,6 @@
       if (style && style.parentNode) style.parentNode.removeChild(style);
     };
 
-    var clearNotificationsChildren = function () {
-      var n = getNotificationsEl();
-      if (!n) return;
-
-      // Delete children only (keep the container in DOM)
-      try {
-        while (n.firstChild) n.removeChild(n.firstChild);
-      } catch (e) {}
-    };
-
     var measureElHeight = function (el) {
       if (!el) return 0;
       var rect = null;
@@ -224,65 +208,79 @@
       return rect && rect.height ? rect.height : 0;
     };
 
+    // Body top handling (safe)
+    var clearBodyTop = function () {
+      try {
+        if (document.body && document.body.style) document.body.style.top = "";
+      } catch (e) {}
+    };
+
+    var setBodyTopIfPositioned = function (px) {
+      try {
+        if (!document.body) return;
+        var pos = "static";
+        try { pos = window.getComputedStyle(document.body).position; } catch (e) {}
+        if (pos && pos !== "static") document.body.style.top = Math.max(0, Math.round(px || 0)) + "px";
+        else clearBodyTop();
+      } catch (e) {}
+    };
+
     //******************************************
     // Applies:
     // - header top: X
     // - body top: Y
-    // - ONLY when bannerActive: neutralize notifications so it can't affect layout
-    var setOffsets = function (headerTopPx, bodyTopPx, bannerActive) {
+    // - suppressNotifications ONLY when bannerContainer exists on THIS page
+    var setOffsets = function (headerTopPx, bodyTopPx, suppressNotifications) {
       var ht = Math.max(0, Math.round(headerTopPx || 0));
       var bt = Math.max(0, Math.round(bodyTopPx || 0));
       var style = ensureStyleTag();
 
       style.textContent =
         '#header{ top:' + ht + 'px !important; }\n' +
-        'body{ top:' + bt + 'px !important; }\n' +
-        (bannerActive
-          ? ('.notifications{ height:0 !important; overflow:hidden !important; padding:0 !important; margin:0 !important; }\n')
-          : '');
+        (suppressNotifications ? ('.notifications{ display:none !important; }\n') : '');
+
+      setBodyTopIfPositioned(bt);
     };
     //******************************************
 
     var applyHeaderOffsetRules = function () {
       if (!isEnabled()) {
         clearHeaderOffsets();
+        clearBodyTop();
         return;
       }
 
-      var banner = getHubspotBannerEl();
+      var bannerContainer = getHubspotBannerContainerEl();
+
+      //******************************************
+      // If banner container exists (open OR closed/no-height), delete/hide notifications ONLY on this page.
+      if (bannerContainer) {
+        var bannerActive = !!(isHubspotBannerActiveByClass(bannerContainer) && measureElHeight(bannerContainer) > 0);
+
+        if (bannerActive) {
+          // open -> header follows banner height
+          setOffsets(measureElHeight(bannerContainer), 0, true);
+        } else {
+          // closed / no height -> header back to 0
+          setOffsets(0, 0, true);
+        }
+        return;
+      }
+      //******************************************
+
+      // No HubSpot banner container on this page -> native notifications allowed
       var notifications = getNotificationsEl();
       var header = getHeaderEl();
 
-      //******************************************
-      // IMPORTANT FIX:
-      // If HubSpot banner exists in DOM but is "closed" OR has no height, we MUST fall back to native notifications
-      // (otherwise notifications get covered by header and appear "gone").
-      var bannerActive = !!(banner && isHubspotBannerActiveByClass(banner) && measureElHeight(banner) > 0);
-      //******************************************
-
-      if (bannerActive) {
-        // HubSpot banner open -> header = banner height, body = 0, and ONLY here neutralize notifications
-        var bannerHeight = measureElHeight(banner);
-
-        // ONLY clear notifications when HubSpot banner is truly open
-        clearNotificationsChildren();
-
-        setOffsets(bannerHeight, 0, true);
-        return;
-      }
-
-      //******************************************
-      // No ACTIVE HubSpot banner -> use native notifications (notifications stays functional, cookie close works)
       var notifHeight = measureElHeight(notifications);
-
-      // Header top should match notifications height
-      // Body top should be: notificationsHeight - headerHeight (your 263 -> 176 example)
       var headerHeight = measureElHeight(header);
+
+      // Header top matches notifications height
+      // Body top compensates: notifHeight - headerHeight
       var bodyTop = notifHeight - headerHeight;
       if (bodyTop < 0) bodyTop = 0;
 
       setOffsets(notifHeight, bodyTop, false);
-      //******************************************
     };
 
     var onHeaderOffsetResize = function () {
@@ -331,21 +329,16 @@
       addCss();
       injectBadge();
       startObserver();
-
-      //******************************************
       startHeaderOffsetObserver();
-      //******************************************
     };
 
     var disable = function () {
       stopObserver();
       removeCss();
       removeBadge();
-
-      //******************************************
       stopHeaderOffsetObserver();
       clearHeaderOffsets();
-      //******************************************
+      clearBodyTop();
     };
 
     var apply = function () {
@@ -353,7 +346,7 @@
       else disable();
     };
 
-    // --- SPA-safe URL change detection (keeps state across internal nav) ---
+    // --- SPA-safe URL change detection ---
     var hookHistory = function () {
       if (window.__uatHistoryHooked) return;
       window.__uatHistoryHooked = true;
@@ -381,16 +374,13 @@
     hookHistory();
 
     window.addEventListener("uat:urlchange", function () {
-      // only change session state when param explicitly present on the new URL
       var p = getUatParam();
       if (p === "on") setEnabled(true);
       if (p === "off") setEnabled(false);
 
       apply();
 
-      //******************************************
       try { applyHeaderOffsetRules(); } catch (e) {}
-      //******************************************
     });
 
     // Initial run
