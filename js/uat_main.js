@@ -1,17 +1,12 @@
 (function () {
   try {
     //******************************************
-    // UAT-only behavior script (final goal)
-    // - Let NATIVE notifications own their own height + CSS calculation by default
-    // - If HubSpot TOP banner exists + is open:
-    //    - Hide native notifications (so they don't stack)
-    //    - Set --notification-height to HubSpot banner height (so native CSS can position header/photos)
-    // - When HubSpot closes:
-    //    - Clear our --notification-height override (hand control back to native)
-    //    - Trigger native notification close button (so native removes classes + sets its cookie)
-    //    - Also set promo-<data-id>=disabled as a backup
-    // - When native notification closes (HS closed):
-    //    - Force header back to top and nudge --notification-height to 0 briefly
+    // UAT-only behavior script (reliable var-driven layout)
+    // - Single source of truth for header offset: --notification-height
+    // - HS open: hide native notifications + set var to HS height
+    // - HS closed: show native notifications + set var to native notifications height (or 0)
+    // - HS closing edge: click native close + set promo cookie (backup)
+    // - Native close click: re-measure and set var so header snaps back up
     // - Registers cleanup hook for main.js
     //******************************************
 
@@ -25,19 +20,28 @@
     var raf2 = null;
 
     //******************************************
-    // Track HubSpot open -> closed so we only fire close/cookie once
+    // Track HS open -> closed edge
     //******************************************
     var lastHsOpen = false;
 
     //******************************************
-    // Track whether HS is currently open (so native close handler doesn't fight HS)
+    // Detect HS banner container (non-modal overlay CTA)
     //******************************************
-    var hsCurrentlyOpen = false; // 👈 ADD THIS
+    var getHubspotBannerContainerEl = function () {
+      var topAnchor = document.getElementById(HS_TOP_ANCHOR_ID);
+      if (!topAnchor) return null;
+
+      return (
+        topAnchor.querySelector(
+          'div[id^="hs-overlay-cta-"]:not([role="dialog"]):not([aria-modal="true"])'
+        ) || null
+      );
+    };
 
     //******************************************
-    // HubSpot banner "open" state is indicated by hs-cta-embed__loaded AND >= 2 go* classes.
+    // HS open state by class (do NOT require height > 0)
     //******************************************
-    var isHubspotBannerActiveByClass = function (el) {
+    var isHubspotBannerOpen = function (el) {
       try {
         if (!el || !el.classList) return false;
         if (!el.classList.contains("hs-cta-embed__loaded")) return false;
@@ -53,28 +57,65 @@
     };
 
     //******************************************
-    // Only treat as "HubSpot banner page" if the NON-MODAL overlay CTA container exists.
+    // Height measurement helpers (more robust than rect.height only)
     //******************************************
-    var getHubspotBannerContainerEl = function () {
-      var topAnchor = document.getElementById(HS_TOP_ANCHOR_ID);
-      if (!topAnchor) return null;
-
-      var el = topAnchor.querySelector(
-        'div[id^="hs-overlay-cta-"]:not([role="dialog"]):not([aria-modal="true"])'
-      );
-
-      return el || null;
+    var measureHeight = function (el) {
+      try {
+        if (!el) return 0;
+        var rect = null;
+        try { rect = el.getBoundingClientRect(); } catch (e) {}
+        var h1 = rect && rect.height ? rect.height : 0;
+        var h2 = el.offsetHeight || 0;
+        var h3 = el.scrollHeight || 0;
+        return Math.max(h1, h2, h3, 0);
+      } catch (e) {
+        return 0;
+      }
     };
 
-    var measureElHeight = function (el) {
-      if (!el) return 0;
-      var rect = null;
-      try { rect = el.getBoundingClientRect(); } catch (e) {}
-      return rect && rect.height ? rect.height : 0;
+    var measureHubspotHeight = function (bannerContainer) {
+      try {
+        if (!bannerContainer) return 0;
+
+        // Try iframe first (often the real height)
+        var iframe = bannerContainer.querySelector("iframe");
+        var h = iframe ? measureHeight(iframe) : 0;
+
+        // Fallback to container
+        if (!h) h = measureHeight(bannerContainer);
+
+        return Math.max(0, Math.round(h || 0));
+      } catch (e) {
+        return 0;
+      }
+    };
+
+    var measureNativeNotificationsHeight = function () {
+      try {
+        var wrap = document.querySelector(".notifications");
+        if (!wrap) return 0;
+
+        // If notifications container is display:none, treat as 0
+        try {
+          var cs = window.getComputedStyle(wrap);
+          if (cs && cs.display === "none") return 0;
+        } catch (e) {}
+
+        // Prefer an actual visible notification
+        var notif =
+          wrap.querySelector('.notification[style*="display: block"]') ||
+          wrap.querySelector(".notification");
+
+        if (!notif) return 0;
+
+        return Math.max(0, Math.round(measureHeight(wrap) || 0));
+      } catch (e) {
+        return 0;
+      }
     };
 
     //******************************************
-    // Style tag ONLY used to hide/show notifications while HS is open
+    // Style tag to hide native notifications while HS is open
     //******************************************
     var ensureStyleTag = function () {
       var style = document.getElementById(HS_STYLE_ID);
@@ -92,9 +133,7 @@
     };
 
     //******************************************
-    // Variable control:
-    // - When HS is open: set --notification-height = HS height (native CSS uses it)
-    // - When HS is not open: remove our override so native notifications can manage it
+    // Set var (do NOT remove it; keep deterministic control for header CSS)
     //******************************************
     var setNotifVar = function (px) {
       try {
@@ -105,42 +144,12 @@
       } catch (e) {}
     };
 
-    var clearNotifVar = function () {
-      try {
-        document.documentElement.style.removeProperty(NOTIF_VAR);
-      } catch (e) {}
-    };
-
     //******************************************
-    // Force header back up after native close (one-time nudge)
-    //******************************************
-    var normalizeHeaderAfterNativeClose = function () { // 👈 ADD THIS
-      try {
-        // Nudge var to 0 so any calc(top: var(--notification-height)) settles immediately
-        setNotifVar(0);
-
-        // Set inline top to 0 as an immediate visual correction
-        var header = document.querySelector("#header.navipandora");
-        if (header) header.style.top = "0px";
-
-        // Then hand control back to native CSS (remove inline + remove var)
-        requestAnimationFrame(function () {
-          try {
-            if (header) header.style.removeProperty("top");
-          } catch (e) {}
-          try {
-            clearNotifVar();
-          } catch (e) {}
-        });
-      } catch (e) {}
-    };
-
-    //******************************************
-    // Get native promo id (data-id) and set cookie promo-<id>=disabled as backup
+    // Backup cookie: promo-<data-id>=disabled on parent domain
     //******************************************
     var setNativePromoDisabledCookieFromDom = function () {
       try {
-        var notif = document.querySelector('.notifications .notification[data-id]');
+        var notif = document.querySelector(".notifications .notification[data-id]");
         if (!notif) return;
 
         var id = (notif.getAttribute("data-id") || "").trim();
@@ -149,14 +158,10 @@
         var name = "promo-" + id;
         var value = "disabled";
 
-        var days = 365;
-        var expires = "";
-        try {
-          var d = new Date();
-          d.setTime(d.getTime() + (days * 24 * 60 * 60 * 1000));
-          expires = "; expires=" + d.toUTCString();
-        } catch (e) {}
+        var d = new Date();
+        d.setTime(d.getTime() + 365 * 24 * 60 * 60 * 1000);
 
+        var expires = "; expires=" + d.toUTCString();
         var domain = "; domain=.margaritavilleatsea.com";
         var path = "; path=/";
         var secure = (location && location.protocol === "https:") ? "; Secure" : "";
@@ -167,14 +172,14 @@
     };
 
     //******************************************
-    // Trigger native close button (best way to let native remove classes + recalc)
+    // Click native close button (lets native remove classes + do its own cleanup)
     //******************************************
     var closeNativeNotificationIfPresent = function () {
       try {
-        var notif = document.querySelector('.notifications .notification[data-id]');
+        var notif = document.querySelector(".notifications .notification[data-id]");
         if (!notif) return;
 
-        var closeBtn = notif.querySelector('button.close');
+        var closeBtn = notif.querySelector("button.close");
         if (!closeBtn) return;
 
         closeBtn.click();
@@ -182,60 +187,55 @@
     };
 
     //******************************************
-    // Apply rules:
-    // - If HS top banner exists:
-    //    - If HS is OPEN: hide notifications + set --notification-height to HS height
-    //    - If HS is CLOSED: show notifications + clear our var override + close native promo (once)
-    // - Else (no HS): allow native notifications fully (no hide, no var override)
+    // Main rule application (var-driven)
     //******************************************
     var applyRules = function () {
       var bannerContainer = getHubspotBannerContainerEl();
 
       // ---- HUBSPOT PRESENT ----
       if (bannerContainer) {
-        var h = measureElHeight(bannerContainer);
-        var open = !!(isHubspotBannerActiveByClass(bannerContainer) && h > 0);
-
-        //******************************************
-        // Track HS open state globally
-        //******************************************
-        hsCurrentlyOpen = !!open; // 👈 ADD THIS
+        var open = !!isHubspotBannerOpen(bannerContainer);
 
         if (open) {
+          // HS open: hide native + set var to HS height
           var style = ensureStyleTag();
           style.textContent = ".notifications{ display:none; }\n";
-          setNotifVar(h);
-        } else {
-          clearStyleTag();
-          clearNotifVar();
 
+          var hsH = measureHubspotHeight(bannerContainer);
+          setNotifVar(hsH);
+
+        } else {
+          // HS closed: show native + set var to native notifications height
+          clearStyleTag();
+
+          // If HS just transitioned open -> closed, close native promo + cookie backup
           if (lastHsOpen === true) {
             closeNativeNotificationIfPresent();
             setNativePromoDisabledCookieFromDom();
-            //******************************************
-            // Also normalize header immediately after HS closes (covers stuck states)
-            //******************************************
-            normalizeHeaderAfterNativeClose(); // 👈 ADD THIS
+
+            // After native close has a moment to run, re-measure and set var (header snaps up)
+            setTimeout(function () {
+              try { setNotifVar(measureNativeNotificationsHeight()); } catch (e) {}
+            }, 0);
+          } else {
+            setNotifVar(measureNativeNotificationsHeight());
           }
         }
 
-        lastHsOpen = !!open;
+        lastHsOpen = open;
         return;
       }
 
       // ---- NO HUBSPOT ----
       clearStyleTag();
-      clearNotifVar();
       lastHsOpen = false;
 
-      //******************************************
-      // If HS isn't even on the page, it's definitely not open.
-      //******************************************
-      hsCurrentlyOpen = false; // 👈 ADD THIS
+      // Native-only page: set var to native notifications height (or 0)
+      setNotifVar(measureNativeNotificationsHeight());
     };
 
     //******************************************
-    // Run twice (some banners animate height after first mutation)
+    // Run twice to catch post-animation sizing
     //******************************************
     var applyRulesTwice = function () {
       try {
@@ -258,6 +258,25 @@
       }, 100);
     };
 
+    //******************************************
+    // Native close listener (event delegation)
+    // When user closes native promo, re-measure and set var so header moves up
+    //******************************************
+    var onDocClick = function (e) {
+      try {
+        var t = e && e.target;
+        if (!t || !t.closest) return;
+
+        var btn = t.closest(".notifications .notification button.close");
+        if (!btn) return;
+
+        // Let native close logic run first, then re-measure
+        setTimeout(function () {
+          try { setNotifVar(measureNativeNotificationsHeight()); } catch (e) {}
+        }, 0);
+      } catch (e) {}
+    };
+
     var startObserver = function () {
       if (hsObs) return;
 
@@ -278,6 +297,7 @@
       });
 
       try { window.addEventListener("resize", onResize); } catch (e) {}
+      try { document.addEventListener("click", onDocClick, true); } catch (e) {}
     };
 
     var stopObserver = function () {
@@ -290,6 +310,7 @@
         hsResizeTimer = null;
       }
       try { window.removeEventListener("resize", onResize); } catch (e) {}
+      try { document.removeEventListener("click", onDocClick, true); } catch (e) {}
 
       try {
         if (raf1) cancelAnimationFrame(raf1);
@@ -297,33 +318,6 @@
       } catch (e) {}
       raf1 = null;
       raf2 = null;
-
-      //******************************************
-      // Remove click handler
-      //******************************************
-      try { document.removeEventListener("click", onDocClick, true); } catch (e) {} // 👈 ADD THIS
-    };
-
-    //******************************************
-    // Native notification close handler (event delegation)
-    // - Only runs when HS is NOT open
-    // - After native close click, normalize header back up
-    //******************************************
-    var onDocClick = function (e) { // 👈 ADD THIS
-      try {
-        if (hsCurrentlyOpen) return; // don't fight HS layout
-        var t = e && e.target;
-        if (!t) return;
-
-        // Find a close button click anywhere inside the native notification close button
-        var btn = (t.closest && t.closest(".notifications .notification button.close")) || null;
-        if (!btn) return;
-
-        // Let native close logic run first, then normalize header/layout
-        setTimeout(function () {
-          try { normalizeHeaderAfterNativeClose(); } catch (e) {}
-        }, 0);
-      } catch (e) {}
     };
 
     //******************************************
@@ -332,16 +326,11 @@
     window.__UAT_MODE_CLEANUP__ = function () {
       try { stopObserver(); } catch (e) {}
       try { clearStyleTag(); } catch (e) {}
-      try { clearNotifVar(); } catch (e) {}
+      try { setNotifVar(0); } catch (e) {}
     };
 
     // Start
     startObserver();
-
-    //******************************************
-    // Listen for native close clicks globally
-    //******************************************
-    document.addEventListener("click", onDocClick, true); // 👈 ADD THIS
 
     // If main.js broadcasts mode changes, clean up when switching away
     window.addEventListener("uat:mode", function (ev) {
