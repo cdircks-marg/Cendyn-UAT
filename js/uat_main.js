@@ -29,7 +29,7 @@
     var closeNativeNotificationIfPresent = function () {
       try {
         var btn = document.querySelector(
-          ".notifications .notification button.close"
+          ".notifications .notification button.close, .url_notifications .notification button.close"
         );
         if (btn) btn.click();
       } catch (e) {}
@@ -42,7 +42,7 @@
     var setNativePromoDisabledCookieFromDom = function () {
       try {
         var notif = document.querySelector(
-          ".notifications .notification[data-id]"
+          ".notifications .notification[data-id], .url_notifications .notification[data-id]"
         );
         if (!notif) return;
 
@@ -63,7 +63,7 @@
     };
 
     //******************************************
-    // Quick hard-hide after we set the cookie (visual safety net)
+    // Hard-hide individual notifications after dismissal (visual safety net)
     //******************************************
     var hideNotificationsHard = function () {
       try {
@@ -72,7 +72,7 @@
           style = document.createElement("style");
           style.id = "uat-hide-native-notifications";
           style.textContent =
-            ".notifications, .url_notifications { display: none !important; }";
+            ".notifications .notification, .url_notifications .notification { display: none !important; }";
           document.head.appendChild(style);
         }
       } catch (e) {}
