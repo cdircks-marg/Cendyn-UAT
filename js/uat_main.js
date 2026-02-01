@@ -2,7 +2,9 @@
   try {
     var HS_PUSH_ANCHOR_ID = "hs-web-interactives-top-push-anchor";
     var lastGoCount = null;
-    var started = false;
+    var armed = false;
+
+    var lockObs = null;
 
     function getAnchor() {
       return document.getElementById(HS_PUSH_ANCHOR_ID);
@@ -40,70 +42,78 @@
       } catch (e) {}
     }
 
-    function suppressNotificationsOnce() {
+    function getNotificationContainer() {
+      return document.querySelector(".notifications") ||
+             document.querySelector(".url_notifications");
+    }
+
+    function forceHideContainer() {
       try {
-        // Always try to set the cookie first (needs data-id before DOM is emptied)
+        // cookie first (needs data-id while DOM exists)
         setPromoDisabledCookieFromDom();
 
-        var containers = document.querySelectorAll(".notifications, .url_notifications");
-        for (var i = 0; i < containers.length; i++) {
-          var c = containers[i];
-          if (!c) continue;
+        var c = getNotificationContainer();
+        if (!c) return;
 
-          // Inline hide beats their CSS + avoids !important
-          c.style.display = "none";
+        // hard lock: inline + important beats their CSS and their inline display:block
+        c.style.setProperty("display", "none", "important");
 
-          // Also clear children so timers/DOM don’t keep running
-          while (c.firstChild) c.removeChild(c.firstChild);
-        }
+        // optional: stop timers/dom churn
+        while (c.firstChild) c.removeChild(c.firstChild);
       } catch (e) {}
     }
 
-    // Enforce for a short window because their script may re-inject repeatedly
-    function enforceSuppression(ms) {
-      var end = Date.now() + ms;
+    function startLockingContainer() {
+      // do once immediately
+      forceHideContainer();
 
-      (function tick() {
-        suppressNotificationsOnce();
-        if (Date.now() < end) {
-          setTimeout(tick, 100);
-        }
-      })();
+      // then keep it locked if their JS flips it back
+      if (lockObs) return;
+
+      lockObs = new MutationObserver(function () {
+        try { forceHideContainer(); } catch (e) {}
+      });
+
+      // observe whole doc until container exists; once it does, this still works
+      lockObs.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "style"]
+      });
     }
 
-    function onHsStateCheck() {
-      var anchor = getAnchor();
-      if (!anchor) return;
+    function checkHsTransition() {
+      var a = getAnchor();
+      if (!a) return;
 
-      var goCount = countGoClasses(anchor);
+      var goCount = countGoClasses(a);
 
       if (lastGoCount === null) {
         lastGoCount = goCount;
         return;
       }
 
-      // HS closed signal: 2+ go* -> 1 go*
-      if (!started && lastGoCount >= 2 && goCount === 1) {
-        started = true;
-
-        // Suppress immediately + enforce briefly to beat reinjection
-        enforceSuppression(5000);
+      // HS closed: 2+ go* classes -> exactly 1 go* class
+      if (!armed && lastGoCount >= 2 && goCount === 1) {
+        armed = true;
+        startLockingContainer();
       }
 
       lastGoCount = goCount;
     }
 
-    var obs = new MutationObserver(function () {
-      try { onHsStateCheck(); } catch (e) {}
+    var hsObs = new MutationObserver(function () {
+      try { checkHsTransition(); } catch (e) {}
     });
 
-    obs.observe(document.documentElement, {
+    hsObs.observe(document.documentElement, {
       childList: true,
       subtree: true,
       attributes: true,
       attributeFilter: ["class"]
     });
 
-    onHsStateCheck();
+    checkHsTransition();
   } catch (e) {}
 })();
