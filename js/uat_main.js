@@ -1,19 +1,11 @@
 (function () {
   try {
     var HS_TOP_ANCHOR_ID = "hs-web-interactives-top-anchor";
-
-    //******************************************
-    // Body class you will use in CSS:
-    // body.hs-closed-hide-countdown .notifications .notification.countdown-promo { display:none !important; }
-    // body.hs-closed-hide-countdown .url_notifications .notification.countdown-promo { display:none !important; }
-    //******************************************
-    var BODY_CLASS = "hs-closed-hide-countdown";
-
+    var HTML_CLASS = "hs-closed-hide-countdown";
     var lastHsOpen = false;
 
-    //******************************************
-    // HubSpot banner helpers
-    //******************************************
+    var htmlEl = document.documentElement;
+
     var getHubspotBannerContainer = function () {
       var anchor = document.getElementById(HS_TOP_ANCHOR_ID);
       if (!anchor) return null;
@@ -38,26 +30,16 @@
       }
     };
 
-    //******************************************
-    // Countdown promo presence + native close trigger
-    //******************************************
     var countdownPromoExists = function () {
       return !!document.querySelector(
-        ".notifications .notification.countdown-promo, " +
-        ".url_notifications .notification.countdown-promo"
+        ".notifications .notification.countdown-promo, .url_notifications .notification.countdown-promo"
       );
     };
 
-    //******************************************
-    // Trigger the NATIVE close button for the countdown promo
-    // - dispatch bubbled click (covers delegated handlers)
-    // - also call .click() as backup
-    //******************************************
     var closeCountdownPromoIfPresent = function () {
       try {
         var btn = document.querySelector(
-          ".notifications .notification.countdown-promo button.close, " +
-          ".url_notifications .notification.countdown-promo button.close"
+          ".notifications .notification.countdown-promo button.close, .url_notifications .notification.countdown-promo button.close"
         );
         if (!btn) return;
 
@@ -73,12 +55,19 @@
       } catch (e) {}
     };
 
-    //******************************************
-    // Apply logic:
-    // - Detect HS open -> closed edge
-    // - If countdown promo exists, trigger its native close
-    // - Add BODY_CLASS so your CSS display:none!important only applies in this condition
-    //******************************************
+    // Remove native "open" state classes from <html> after HS close (fallback cleanup)
+    var cleanupNativeHtmlState = function () {
+      try {
+        if (!htmlEl || !htmlEl.classList) return;
+
+        htmlEl.classList.remove("notifications-open");
+        htmlEl.classList.remove("countdown-timer-bar-show");
+
+        // Also clear the inline var if it's stuck (safe, since HS just closed)
+        try { htmlEl.style.removeProperty("--notification-height"); } catch (e) {}
+      } catch (e) {}
+    };
+
     var apply = function () {
       var hs = getHubspotBannerContainer();
       var open = !!(hs && isHubspotOpen(hs));
@@ -86,19 +75,22 @@
       // HS just closed
       if (!open && lastHsOpen) {
         if (countdownPromoExists()) {
+          // 1) Trigger native close FIRST
           closeCountdownPromoIfPresent();
 
-          // Add class AFTER attempting native close (CSS acts as safety net)
-          try { document.body.classList.add(BODY_CLASS); } catch (e) {}
+          // 2) Add your gating class to <html> (so your CSS can key off it safely)
+          try { htmlEl.classList.add(HTML_CLASS); } catch (e) {}
+
+          // 3) After native close runs, cleanup native html "open" classes (fallback)
+          setTimeout(function () {
+            try { cleanupNativeHtmlState(); } catch (e) {}
+          }, 0);
         }
       }
 
       lastHsOpen = open;
     };
 
-    //******************************************
-    // Observe for HS state changes
-    //******************************************
     var obs = new MutationObserver(function () {
       try { apply(); } catch (e) {}
     });
@@ -112,7 +104,6 @@
       });
     }
 
-    // Initial run
     apply();
   } catch (e) {}
 })();
