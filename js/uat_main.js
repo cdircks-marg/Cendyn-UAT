@@ -101,6 +101,7 @@
     var applyRules = function () {
       var bannerContainer = getHubspotBannerContainerEl();
 
+      // ---- HUBSPOT PRESENT ----
       if (bannerContainer) {
         var style = ensureStyleTag();
         style.textContent = ".notifications{ display:none; }\n";
@@ -108,16 +109,24 @@
         var h = measureElHeight(bannerContainer);
         var open = !!(isHubspotBannerActiveByClass(bannerContainer) && h > 0);
 
-        if (open) setNotifVar(h);
-        else setNotifVar(0);
-
+        if (open) {
+          setNotifVar(h);
+        } else {
+          // HS closed
+          setNotifVar(0);
+          forceHeaderTopZeroOnce(); // 👈 ADD THIS
+        }
         return;
       }
 
-      // No HS banner container -> restore native notifications behavior
+      // ---- NO HUBSPOT ----
       clearStyleTag();
       clearNotifVar();
+
+      // Native notifications just closed
+      forceHeaderTopZeroOnce(); // 👈 ADD THIS
     };
+
 
     //******************************************
     // Run twice (some banners animate height after first mutation)
