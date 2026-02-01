@@ -84,3 +84,16 @@ html body .search-modal {
 html body #header.navipandora.navipandora--offset {
   top: 0px !important;
 }
+html
+  body.hs-closed-hide-countdown
+  .notifications
+  .notification.countdown-promo {
+  display: none !important;
+}
+
+html
+  body.hs-closed-hide-countdown
+  .url_notifications
+  .notification.countdown-promo {
+  display: none !important;
+}
