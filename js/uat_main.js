@@ -3,6 +3,8 @@
     var HS_TOP_ANCHOR_ID = "hs-web-interactives-top-anchor";
     var lastHsOpen = false;
 
+    var htmlEl = document.documentElement;
+
     var getHubspotBannerContainer = function () {
       var anchor = document.getElementById(HS_TOP_ANCHOR_ID);
       if (!anchor) return null;
@@ -27,48 +29,93 @@
       }
     };
 
-    // Finds EXACTLY: <button class="close" aria-label="Close Banner">...</button>
-    // inside the countdown promo notification
-    var getNativeCountdownCloseBtn = function () {
+    // Countdown promo element (native notification)
+    var getCountdownPromo = function () {
       return document.querySelector(
-        '.notifications .notification.countdown-promo button.close[aria-label="Close Banner"],' +
-        '.url_notifications .notification.countdown-promo button.close[aria-label="Close Banner"]'
+        ".notifications .notification.countdown-promo, .url_notifications .notification.countdown-promo"
       );
     };
 
-    // Fire a realistic sequence (covers delegated + pointer-based handlers)
-    var triggerCloseButton = function (btn) {
-      if (!btn) return;
-
+    // Set promo-<data-id>=disabled cookie
+    var setPromoDisabledCookieFromDom = function () {
       try {
-        // Pointer events (modern)
-        if (typeof PointerEvent === "function") {
-          btn.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
-          btn.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true }));
-        }
-      } catch (e) {}
+        var promo = getCountdownPromo();
+        if (!promo) return;
 
-      try {
-        // Mouse events (legacy/delegated)
-        btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-        btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-        btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-      } catch (e) {}
+        var id = (promo.getAttribute("data-id") || "").trim();
+        if (!id) return;
 
-      try {
-        // Direct click fallback
-        if (typeof btn.click === "function") btn.click();
+        var d = new Date();
+        d.setTime(d.getTime() + 365 * 24 * 60 * 60 * 1000);
+
+        document.cookie =
+          "promo-" + id + "=disabled" +
+          "; expires=" + d.toUTCString() +
+          "; domain=.margaritavilleatsea.com" +
+          "; path=/" +
+          "; SameSite=Lax" +
+          (location.protocol === "https:" ? "; Secure" : "");
       } catch (e) {}
     };
+
+    // Force the same end-state as "closed"
+    var forceNativeClosedState = function () {
+      try {
+        // 1) Remove the promo element (strongest / cleanest)
+        var promo = getCountdownPromo();
+        if (promo && promo.parentNode) {
+          promo.parentNode.removeChild(promo);
+        }
+
+        // 2) Remove native "open" state classes (these drive header/layout)
+        if (htmlEl && htmlEl.classList) {
+          htmlEl.classList.remove("notifications-open");
+          htmlEl.classList.remove("countdown-timer-bar-show");
+        }
+
+        // 3) Clear the inline CSS var (native uses this)
+        try { htmlEl.style.removeProperty("--notification-height"); } catch (e) {}
+      } catch (e) {}
+    };
+
+    // Because their JS may re-insert or re-open, enforce for a short window after HS close
+    var enforceForMs = function (ms) {
+      var end = Date.now() + ms;
+      var timer = null;
+
+      var tick = function () {
+        try {
+          forceNativeClosedState();
+        } catch (e) {}
+
+        if (Date.now() < end) {
+          timer = setTimeout(tick, 100);
+        }
+      };
+
+      tick();
+      return function () {
+        try { if (timer) clearTimeout(timer); } catch (e) {}
+      };
+    };
+
+    var stopEnforce = null;
 
     var apply = function () {
       var hs = getHubspotBannerContainer();
       var open = !!(hs && isHubspotOpen(hs));
 
-      // HS just closed -> trigger native notification close button
+      // HS just closed
       if (!open && lastHsOpen) {
-        var btn = getNativeCountdownCloseBtn();
-        if (btn) triggerCloseButton(btn);
+        // Persist it
+        setPromoDisabledCookieFromDom();
+
+        // Force immediate close state
+        forceNativeClosedState();
+
+        // Enforce for 3 seconds in case native JS re-opens/re-inserts
+        if (stopEnforce) { try { stopEnforce(); } catch (e) {} }
+        stopEnforce = enforceForMs(3000);
       }
 
       lastHsOpen = open;
