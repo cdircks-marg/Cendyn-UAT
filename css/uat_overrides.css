@@ -56,11 +56,6 @@
       max-height: 60vh;
     }
   }
-
-  html body .countdown-timer-bar-show #photos {
-    margin-top: 58px;
-    height: calc(100% - 84px);
-  }
 }
 
 @media (min-width: 768px) and (max-width: 1024px) {
