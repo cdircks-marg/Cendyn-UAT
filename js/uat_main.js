@@ -2,9 +2,7 @@
   try {
     var HS_PUSH_ANCHOR_ID = "hs-web-interactives-top-push-anchor";
     var lastGoCount = null;
-    var armed = false;
-
-    var notifObs = null;
+    var started = false;
 
     function getAnchor() {
       return document.getElementById(HS_PUSH_ANCHOR_ID);
@@ -19,8 +17,14 @@
       return count;
     }
 
-    function setPromoDisabledCookieById(id) {
+    function setPromoDisabledCookieFromDom() {
       try {
+        var promo = document.querySelector(
+          ".notifications .notification.countdown-promo[data-id], .url_notifications .notification.countdown-promo[data-id]"
+        );
+        if (!promo) return;
+
+        var id = (promo.getAttribute("data-id") || "").trim();
         if (!id) return;
 
         var d = new Date();
@@ -36,55 +40,35 @@
       } catch (e) {}
     }
 
-    function setCookieFromAnyCountdownPromo() {
+    function suppressNotificationsOnce() {
       try {
-        var promo = document.querySelector(
-          ".notifications .notification.countdown-promo[data-id], .url_notifications .notification.countdown-promo[data-id]"
-        );
-        if (!promo) return;
-
-        var id = (promo.getAttribute("data-id") || "").trim();
-        if (!id) return;
-
-        setPromoDisabledCookieById(id);
-      } catch (e) {}
-    }
-
-    function clearNotificationContainers() {
-      try {
-        // set cookie BEFORE clearing (so we still can read data-id)
-        setCookieFromAnyCountdownPromo();
+        // Always try to set the cookie first (needs data-id before DOM is emptied)
+        setPromoDisabledCookieFromDom();
 
         var containers = document.querySelectorAll(".notifications, .url_notifications");
         for (var i = 0; i < containers.length; i++) {
           var c = containers[i];
+          if (!c) continue;
+
+          // Inline hide beats their CSS + avoids !important
+          c.style.display = "none";
+
+          // Also clear children so timers/DOM don’t keep running
           while (c.firstChild) c.removeChild(c.firstChild);
         }
       } catch (e) {}
     }
 
-    function startKeepingNotificationsEmpty() {
-      if (notifObs) return;
+    // Enforce for a short window because their script may re-inject repeatedly
+    function enforceSuppression(ms) {
+      var end = Date.now() + ms;
 
-      // Clear immediately once
-      clearNotificationContainers();
-
-      notifObs = new MutationObserver(function () {
-        // Any time something is injected back in, wipe it again
-        clearNotificationContainers();
-      });
-
-      // Observe only the notification containers (more efficient than whole document)
-      // If containers don't exist yet, observe document until they do.
-      var containers = document.querySelectorAll(".notifications, .url_notifications");
-      if (containers && containers.length) {
-        for (var i = 0; i < containers.length; i++) {
-          notifObs.observe(containers[i], { childList: true, subtree: false });
+      (function tick() {
+        suppressNotificationsOnce();
+        if (Date.now() < end) {
+          setTimeout(tick, 100);
         }
-      } else {
-        // Fallback: observe the doc and clear when containers appear
-        notifObs.observe(document.documentElement, { childList: true, subtree: true });
-      }
+      })();
     }
 
     function onHsStateCheck() {
@@ -98,20 +82,22 @@
         return;
       }
 
-      // HS closed signal: went from 2+ go* classes -> exactly 1
-      if (!armed && lastGoCount >= 2 && goCount === 1) {
-        armed = true;
-        startKeepingNotificationsEmpty();
+      // HS closed signal: 2+ go* -> 1 go*
+      if (!started && lastGoCount >= 2 && goCount === 1) {
+        started = true;
+
+        // Suppress immediately + enforce briefly to beat reinjection
+        enforceSuppression(5000);
       }
 
       lastGoCount = goCount;
     }
 
-    var hsObs = new MutationObserver(function () {
+    var obs = new MutationObserver(function () {
       try { onHsStateCheck(); } catch (e) {}
     });
 
-    hsObs.observe(document.documentElement, {
+    obs.observe(document.documentElement, {
       childList: true,
       subtree: true,
       attributes: true,
