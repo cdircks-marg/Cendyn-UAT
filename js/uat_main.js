@@ -3,6 +3,9 @@
     var HS_TOP_ANCHOR_ID = "hs-web-interactives-top-anchor";
     var lastHsOpen = false;
 
+    //******************************************
+    // HubSpot banner helpers
+    //******************************************
     var getHubspotBannerContainer = function () {
       var anchor = document.getElementById(HS_TOP_ANCHOR_ID);
       if (!anchor) return null;
@@ -13,42 +16,41 @@
     };
 
     var isHubspotOpen = function (el) {
-      if (!el || !el.classList) return false;
-      if (!el.classList.contains("hs-cta-embed__loaded")) return false;
+      try {
+        if (!el || !el.classList) return false;
+        if (!el.classList.contains("hs-cta-embed__loaded")) return false;
 
-      var goCount = 0;
-      el.classList.forEach(function (c) {
-        if (/^go\d+$/.test(c)) goCount++;
-      });
-      return goCount >= 2;
+        var goCount = 0;
+        el.classList.forEach(function (c) {
+          if (/^go\d+$/.test(c)) goCount++;
+        });
+        return goCount >= 2;
+      } catch (e) {
+        return false;
+      }
     };
 
     //******************************************
-    // Close native countdown promo via its real close button
+    // Countdown promo helpers
     //******************************************
-    var closeNativeCountdownPromoIfPresent = function () {
-      try {
-        var btn = document.querySelector(
-          ".notifications .notification.countdown-promo button.close," +
+    var getCountdownPromo = function () {
+      return document.querySelector(
+        ".notifications .notification.countdown-promo, .url_notifications .notification.countdown-promo"
+      );
+    };
+
+    var getCountdownPromoCloseBtn = function () {
+      return document.querySelector(
+        ".notifications .notification.countdown-promo button.close, " +
           ".url_notifications .notification.countdown-promo button.close"
-        );
-        if (btn) btn.click();
-      } catch (e) {}
+      );
     };
 
     //******************************************
-    // Set native promo disable cookie (backup / persistence)
-    // Creates: promo-<data-id>=disabled on domain .margaritavilleatsea.com
+    // Set promo-<data-id>=disabled (backup persistence)
     //******************************************
-    var setNativePromoDisabledCookieFromDom = function () {
+    var setPromoDisabledCookie = function (id) {
       try {
-        var notif = document.querySelector(
-          ".notifications .notification.countdown-promo[data-id]," +
-          ".url_notifications .notification.countdown-promo[data-id]"
-        );
-        if (!notif) return;
-
-        var id = (notif.getAttribute("data-id") || "").trim();
         if (!id) return;
 
         var d = new Date();
@@ -64,49 +66,82 @@
       } catch (e) {}
     };
 
-    //******************************************
-    // Hard-hide BOTH notification containers after HS close (wins reliably)
-    //******************************************
-    var hideNotificationContainersHard = function () {
+    var setPromoDisabledCookieFromDom = function () {
       try {
-        var style = document.getElementById("uat-hide-notification-containers");
-        if (!style) {
-          style = document.createElement("style");
-          style.id = "uat-hide-notification-containers";
-          style.textContent =
-            ".notifications, .url_notifications { display: none !important; }";
-          document.head.appendChild(style);
-        }
+        var promo = getCountdownPromo();
+        if (!promo) return;
+
+        var id = (promo.getAttribute("data-id") || "").trim();
+        if (!id) return;
+
+        setPromoDisabledCookie(id);
       } catch (e) {}
     };
 
+    //******************************************
+    // Trigger native close button in a compatible way:
+    // - dispatch bubbling click (for delegated listeners)
+    // - also call .click() as backup
+    //******************************************
+    var triggerCountdownPromoClose = function () {
+      try {
+        var btn = getCountdownPromoCloseBtn();
+        if (!btn) return;
+
+        // Capture ID before DOM changes
+        try {
+          var promo = btn.closest(".notification.countdown-promo");
+          var id = promo ? (promo.getAttribute("data-id") || "").trim() : "";
+          if (id) setPromoDisabledCookie(id);
+        } catch (e) {}
+
+        // Delegated handlers often require a bubbled event
+        try {
+          btn.dispatchEvent(
+            new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
+          );
+        } catch (e) {}
+
+        // Direct click fallback
+        try {
+          if (typeof btn.click === "function") btn.click();
+        } catch (e) {}
+      } catch (e) {}
+    };
+
+    //******************************************
+    // On HS open -> closed, close native countdown promo + set cookie
+    //******************************************
     var apply = function () {
       var hs = getHubspotBannerContainer();
       var open = !!(hs && isHubspotOpen(hs));
 
-      //******************************************
-      // HS just closed → dismiss native countdown promo once + hide bar
-      //******************************************
       if (!open && lastHsOpen) {
-        closeNativeCountdownPromoIfPresent();
-        setNativePromoDisabledCookieFromDom();
-        hideNotificationContainersHard();
+        // Set cookie (persistence) then trigger native close path
+        setPromoDisabledCookieFromDom();
+        triggerCountdownPromoClose();
       }
 
       lastHsOpen = open;
     };
 
+    //******************************************
+    // Observe DOM for HS state changes
+    //******************************************
     var obs = new MutationObserver(function () {
-      apply();
+      try { apply(); } catch (e) {}
     });
 
-    obs.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["class", "style"]
-    });
+    if (document.body) {
+      obs.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "style"]
+      });
+    }
 
+    // Initial run
     apply();
   } catch (e) {}
 })();
