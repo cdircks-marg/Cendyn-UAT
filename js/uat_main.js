@@ -16,6 +16,11 @@
     var raf1 = null;
     var raf2 = null;
 
+    //******************************************
+    // Track HubSpot "open -> closed" edge so we can set promo cookie once.
+    //******************************************
+    var lastHsOpen = false; // 👈 ADD THIS
+
     // HubSpot banner "open" state is indicated by having hs-cta-embed__loaded AND >= 2 go* classes.
     // When it closes, HubSpot removes the last go* class.
     var isHubspotBannerActiveByClass = function (el) {
@@ -89,7 +94,61 @@
     var clearNotifVar = function () {
       try {
         // remove inline override so native CSS/JS can manage it
-        document.documentElement.style.removeProperty(NOTIF_VAR);
+        //document.documentElement.style.removeProperty(NOTIF_VAR);
+      } catch (e) {}
+    };
+
+    //******************************************
+    // Force header back to 0px (inline) once
+    //******************************************
+    var forceHeaderTopZeroOnce = function () { // 👈 ADD THIS
+      try {
+        var header = document.querySelector("#header.navipandora");
+        if (!header) return;
+        header.style.top = "0px";
+      } catch (e) {}
+    };
+
+    //******************************************
+    // Set native promo cookie based on visible .notification[data-id]
+    // Creates cookie: promo-<id>=disabled on domain .margaritavilleatsea.com
+    //******************************************
+    var setNativePromoDisabledCookieFromDom = function () { // 👈 ADD THIS
+      try {
+        var notif = document.querySelector(
+          '.notifications .notification[data-id][style*="display: block"],' +
+          '.notifications .notification[data-id]:not([style*="display: none"])'
+        );
+
+        // Fallback: first notification with data-id
+        if (!notif) {
+          notif = document.querySelector('.notifications .notification[data-id]');
+        }
+        if (!notif) return;
+
+        var id = (notif.getAttribute("data-id") || "").trim();
+        if (!id) return;
+
+        var name = "promo-" + id;
+        var value = "disabled";
+
+        var days = 365;
+        var expires = "";
+        try {
+          var d = new Date();
+          d.setTime(d.getTime() + (days * 24 * 60 * 60 * 1000));
+          expires = "; expires=" + d.toUTCString();
+        } catch (e) {}
+
+        // Ensure cookie works for both www + reservations by writing to parent domain
+        var domain = "; domain=.margaritavilleatsea.com";
+        var path = "; path=/";
+
+        // Secure / SameSite - safe defaults for HTTPS
+        var secure = (location && location.protocol === "https:") ? "; Secure" : "";
+        var sameSite = "; SameSite=Lax";
+
+        document.cookie = name + "=" + value + expires + domain + path + sameSite + secure;
       } catch (e) {}
     };
 
@@ -114,8 +173,21 @@
         } else {
           // HS closed
           setNotifVar(0);
-          forceHeaderTopZeroOnce(); // 👈 ADD THIS
+          forceHeaderTopZeroOnce(); // 👈 existing line you had
+
+          //******************************************
+          // If HS just transitioned from open -> closed,
+          // disable the native promo via the same cookie it sets on close.
+          //******************************************
+          if (lastHsOpen === true) { // 👈 ADD THIS
+            setNativePromoDisabledCookieFromDom(); // 👈 ADD THIS
+          }
         }
+
+        //******************************************
+        // Update lastHsOpen state while HS container exists
+        //******************************************
+        lastHsOpen = !!open; // 👈 ADD THIS
         return;
       }
 
@@ -123,8 +195,13 @@
       clearStyleTag();
       clearNotifVar();
 
+      //******************************************
+      // Reset state when HS container is gone
+      //******************************************
+      lastHsOpen = false; // 👈 ADD THIS
+
       // Native notifications just closed
-      forceHeaderTopZeroOnce(); // 👈 ADD THIS
+      forceHeaderTopZeroOnce(); // 👈 existing line you had
     };
 
 
