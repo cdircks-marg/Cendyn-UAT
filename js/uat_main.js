@@ -1,10 +1,7 @@
 (function () {
   try {
     var HS_TOP_ANCHOR_ID = "hs-web-interactives-top-anchor";
-    var HTML_CLASS = "hs-closed-hide-countdown";
     var lastHsOpen = false;
-
-    var htmlEl = document.documentElement;
 
     var getHubspotBannerContainer = function () {
       var anchor = document.getElementById(HS_TOP_ANCHOR_ID);
@@ -30,41 +27,37 @@
       }
     };
 
-    var countdownPromoExists = function () {
-      return !!document.querySelector(
-        ".notifications .notification.countdown-promo, .url_notifications .notification.countdown-promo"
+    // Finds EXACTLY: <button class="close" aria-label="Close Banner">...</button>
+    // inside the countdown promo notification
+    var getNativeCountdownCloseBtn = function () {
+      return document.querySelector(
+        '.notifications .notification.countdown-promo button.close[aria-label="Close Banner"],' +
+        '.url_notifications .notification.countdown-promo button.close[aria-label="Close Banner"]'
       );
     };
 
-    var closeCountdownPromoIfPresent = function () {
+    // Fire a realistic sequence (covers delegated + pointer-based handlers)
+    var triggerCloseButton = function (btn) {
+      if (!btn) return;
+
       try {
-        var btn = document.querySelector(
-          ".notifications .notification.countdown-promo button.close, .url_notifications .notification.countdown-promo button.close"
-        );
-        if (!btn) return;
-
-        try {
-          btn.dispatchEvent(
-            new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
-          );
-        } catch (e) {}
-
-        try {
-          if (typeof btn.click === "function") btn.click();
-        } catch (e) {}
+        // Pointer events (modern)
+        if (typeof PointerEvent === "function") {
+          btn.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+          btn.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true }));
+        }
       } catch (e) {}
-    };
 
-    // Remove native "open" state classes from <html> after HS close (fallback cleanup)
-    var cleanupNativeHtmlState = function () {
       try {
-        if (!htmlEl || !htmlEl.classList) return;
+        // Mouse events (legacy/delegated)
+        btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+        btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+        btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      } catch (e) {}
 
-        htmlEl.classList.remove("notifications-open");
-        htmlEl.classList.remove("countdown-timer-bar-show");
-
-        // Also clear the inline var if it's stuck (safe, since HS just closed)
-        try { htmlEl.style.removeProperty("--notification-height"); } catch (e) {}
+      try {
+        // Direct click fallback
+        if (typeof btn.click === "function") btn.click();
       } catch (e) {}
     };
 
@@ -72,20 +65,10 @@
       var hs = getHubspotBannerContainer();
       var open = !!(hs && isHubspotOpen(hs));
 
-      // HS just closed
+      // HS just closed -> trigger native notification close button
       if (!open && lastHsOpen) {
-        if (countdownPromoExists()) {
-          // 1) Trigger native close FIRST
-          closeCountdownPromoIfPresent();
-
-          // 2) Add your gating class to <html> (so your CSS can key off it safely)
-          try { htmlEl.classList.add(HTML_CLASS); } catch (e) {}
-
-          // 3) After native close runs, cleanup native html "open" classes (fallback)
-          setTimeout(function () {
-            try { cleanupNativeHtmlState(); } catch (e) {}
-          }, 0);
-        }
+        var btn = getNativeCountdownCloseBtn();
+        if (btn) triggerCloseButton(btn);
       }
 
       lastHsOpen = open;
@@ -100,7 +83,7 @@
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ["class"]
+        attributeFilter: ["class", "style"]
       });
     }
 
