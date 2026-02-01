@@ -1,38 +1,7 @@
 (function () {
   try {
     var HS_TOP_ANCHOR_ID = "hs-web-interactives-top-anchor";
-    var HEADER_SELECTOR = "#header.navipandora";
-    var OFFSET_CLASS = "navipandora--offset";
-    var STYLE_ID = "uat-hide-native-notifs-when-hs-open";
-
     var lastHsOpen = false;
-
-    var getHeader = function () {
-      return document.querySelector(HEADER_SELECTOR);
-    };
-
-    var setHeaderOffsetClass = function (on) {
-      try {
-        var h = getHeader();
-        if (!h) return;
-        h.classList.toggle(OFFSET_CLASS, !!on);
-      } catch (e) {}
-    };
-
-    var ensureHideStyle = function () {
-      var s = document.getElementById(STYLE_ID);
-      if (!s) {
-        s = document.createElement("style");
-        s.id = STYLE_ID;
-        document.head.appendChild(s);
-      }
-      s.textContent = ".notifications{display:none !important;}";
-    };
-
-    var clearHideStyle = function () {
-      var s = document.getElementById(STYLE_ID);
-      if (s && s.parentNode) s.parentNode.removeChild(s);
-    };
 
     var getHubspotBannerContainer = function () {
       var anchor = document.getElementById(HS_TOP_ANCHOR_ID);
@@ -54,19 +23,29 @@
       return goCount >= 2;
     };
 
+    //******************************************
+    // Close native notification via its real close button
+    //******************************************
     var closeNativeNotificationIfPresent = function () {
       try {
-        var btn = document.querySelector(".notifications .notification button.close");
+        var btn = document.querySelector(
+          ".notifications .notification button.close"
+        );
         if (btn) btn.click();
       } catch (e) {}
     };
 
-    var setNativePromoCookie = function () {
+    //******************************************
+    // Set native promo disable cookie (backup / persistence)
+    //******************************************
+    var setNativePromoDisabledCookieFromDom = function () {
       try {
-        var n = document.querySelector(".notifications .notification[data-id]");
-        if (!n) return;
+        var notif = document.querySelector(
+          ".notifications .notification[data-id]"
+        );
+        if (!notif) return;
 
-        var id = (n.getAttribute("data-id") || "").trim();
+        var id = (notif.getAttribute("data-id") || "").trim();
         if (!id) return;
 
         var d = new Date();
@@ -75,7 +54,10 @@
         document.cookie =
           "promo-" + id + "=disabled" +
           "; expires=" + d.toUTCString() +
-          "; domain=.margaritavilleatsea.com; path=/; SameSite=Lax; Secure";
+          "; domain=.margaritavilleatsea.com" +
+          "; path=/" +
+          "; SameSite=Lax" +
+          (location.protocol === "https:" ? "; Secure" : "");
       } catch (e) {}
     };
 
@@ -83,33 +65,26 @@
       var hs = getHubspotBannerContainer();
       var open = !!(hs && isHubspotOpen(hs));
 
-      if (open) {
-        // HS open
-        ensureHideStyle();
-        setHeaderOffsetClass(true);
-      } else {
-        // HS closed
-        clearHideStyle();
-        setHeaderOffsetClass(false);
-
-        if (lastHsOpen) {
-          closeNativeNotificationIfPresent();
-          setNativePromoCookie();
-        }
+      //******************************************
+      // HS just closed → dismiss native promo once
+      //******************************************
+      if (!open && lastHsOpen) {
+        closeNativeNotificationIfPresent();
+        setNativePromoDisabledCookieFromDom();
       }
 
       lastHsOpen = open;
     };
 
     var obs = new MutationObserver(function () {
-      try { apply(); } catch (e) {}
+      apply();
     });
 
     obs.observe(document.body, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["class", "style"]
+      attributeFilter: ["class"]
     });
 
     apply();
