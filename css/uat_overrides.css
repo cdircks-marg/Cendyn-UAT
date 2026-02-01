@@ -79,3 +79,8 @@
 html body .search-modal {
   z-index: 10000;
 }
+
+/* Only override while HubSpot is open */
+html body #header.navipandora.navipandora--offset {
+  top: 0px !important;
+}
