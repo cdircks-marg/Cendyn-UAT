@@ -37,6 +37,7 @@
 
     //******************************************
     // Set native promo disable cookie (backup / persistence)
+    // Creates: promo-<data-id>=disabled on domain .margaritavilleatsea.com
     //******************************************
     var setNativePromoDisabledCookieFromDom = function () {
       try {
@@ -61,6 +62,22 @@
       } catch (e) {}
     };
 
+    //******************************************
+    // Quick hard-hide after we set the cookie (visual safety net)
+    //******************************************
+    var hideNotificationsHard = function () {
+      try {
+        var style = document.getElementById("uat-hide-native-notifications");
+        if (!style) {
+          style = document.createElement("style");
+          style.id = "uat-hide-native-notifications";
+          style.textContent =
+            ".notifications, .url_notifications { display: none !important; }";
+          document.head.appendChild(style);
+        }
+      } catch (e) {}
+    };
+
     var apply = function () {
       var hs = getHubspotBannerContainer();
       var open = !!(hs && isHubspotOpen(hs));
@@ -71,6 +88,7 @@
       if (!open && lastHsOpen) {
         closeNativeNotificationIfPresent();
         setNativePromoDisabledCookieFromDom();
+        hideNotificationsHard();
       }
 
       lastHsOpen = open;
