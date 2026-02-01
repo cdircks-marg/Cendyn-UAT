@@ -98,7 +98,7 @@
       var style = ensureStyleTag();
 
       style.textContent =
-        '#header{ top:' + ht + 'px !important; }\n' +
+        '#header{ top: 0px; }\n' +
         (suppressNotifications ? ('.notifications .notification{ display:none; }\n') : '');
 
       setBodyTopIfPositioned(bt);
