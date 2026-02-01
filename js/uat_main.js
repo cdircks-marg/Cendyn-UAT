@@ -99,7 +99,7 @@
 
       style.textContent =
         '#header{ top:' + ht + 'px !important; }\n' +
-        (suppressNotifications ? ('.notifications{ display:none !important; }\n') : '');
+        (suppressNotifications ? ('.notifications .notification{ display:none; }\n') : '');
 
       setBodyTopIfPositioned(bt);
     };
