@@ -1,95 +1,123 @@
 (function () {
   try {
-    var HS_TOP_ANCHOR_ID = "hs-web-interactives-top-anchor";
-    var DID_TRY_CLOSE = false;
-    var RETRY_MS = 150;
-    var MAX_RETRIES = 40; // ~6 seconds total
+    var HS_PUSH_ANCHOR_ID = "hs-web-interactives-top-push-anchor";
+    var lastOpen = null;
 
-    var getHubspotBannerContainer = function () {
-      var anchor = document.getElementById(HS_TOP_ANCHOR_ID);
-      if (!anchor) return null;
+    function getPushAnchor() {
+      return document.getElementById(HS_PUSH_ANCHOR_ID);
+    }
 
-      return anchor.querySelector(
-        'div[id^="hs-overlay-cta-"]:not([role="dialog"]):not([aria-modal="true"])'
-      );
-    };
+    function countGoClasses(el) {
+      try {
+        if (!el || !el.classList) return 0;
+        var n = 0;
+        for (var i = 0; i < el.classList.length; i++) {
+          if (/^go\d+$/.test(el.classList[i])) n++;
+        }
+        return n;
+      } catch (e) {
+        return 0;
+      }
+    }
 
-    var getNativeCloseBtn = function () {
+    // "Open" = 2+ go* classes. "Closed" = 1 go* class.
+    function isHsOpenByPushAnchor(el) {
+      return countGoClasses(el) >= 2;
+    }
+
+    function getNativeCountdownCloseBtn() {
       return document.querySelector(
         '.notifications .notification.countdown-promo button.close[aria-label="Close Banner"],' +
-        '.url_notifications .notification.countdown-promo button.close[aria-label="Close Banner"],' +
-        ".notifications .notification.countdown-promo button.close," +
-        ".url_notifications .notification.countdown-promo button.close"
+          '.url_notifications .notification.countdown-promo button.close[aria-label="Close Banner"],' +
+          ".notifications .notification.countdown-promo button.close," +
+          ".url_notifications .notification.countdown-promo button.close"
       );
-    };
+    }
 
-    var fire = function (el, type, EventCtor, props) {
+    // Try to trigger close using bubbled events + .click()
+    function triggerClose(btn) {
+      if (!btn) return;
+
       try {
-        var ev = null;
-        if (EventCtor && typeof EventCtor === "function") {
-          ev = new EventCtor(type, props || { bubbles: true, cancelable: true });
-        } else {
-          ev = document.createEvent("Event");
-          ev.initEvent(type, true, true);
-        }
-        el.dispatchEvent(ev);
+        btn.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
+        );
       } catch (e) {}
-    };
 
-    var attemptClose = function () {
       try {
-        var btn = getNativeCloseBtn();
-        if (!btn) return false;
+        if (typeof btn.click === "function") btn.click();
+      } catch (e) {}
+    }
 
-        // Try a realistic sequence that covers most handlers
-        fire(btn, "pointerdown", window.PointerEvent, { bubbles: true, cancelable: true, pointerType: "mouse" });
-        fire(btn, "pointerup", window.PointerEvent, { bubbles: true, cancelable: true, pointerType: "mouse" });
-
-        fire(btn, "mousedown", window.MouseEvent, { bubbles: true, cancelable: true, view: window });
-        fire(btn, "mouseup", window.MouseEvent, { bubbles: true, cancelable: true, view: window });
-        fire(btn, "click", window.MouseEvent, { bubbles: true, cancelable: true, view: window });
-
-        fire(btn, "touchstart", window.TouchEvent, { bubbles: true, cancelable: true });
-        fire(btn, "touchend", window.TouchEvent, { bubbles: true, cancelable: true });
-
-        // Direct fallback
-        try { btn.click(); } catch (e) {}
-
-        return true;
-      } catch (e) {
-        return false;
-      }
-    };
-
-    var startCloseOnceHubspotIsSeen = function () {
-      if (DID_TRY_CLOSE) return;
-      DID_TRY_CLOSE = true;
-
+    // Run close attempts a few times right after HS closes (covers render timing)
+    function closeNativeNotificationsAfterHsClose() {
       var tries = 0;
+      var maxTries = 10; // ~1.5s total
       var timer = setInterval(function () {
         tries++;
 
-        var ok = attemptClose();
-        if (ok || tries >= MAX_RETRIES) {
-          try { clearInterval(timer); } catch (e) {}
+        var btn = getNativeCountdownCloseBtn();
+        if (btn) {
+          triggerClose(btn);
+          clearInterval(timer);
+          return;
         }
-      }, RETRY_MS);
-    };
 
-    var apply = function () {
-      var hs = getHubspotBannerContainer();
-      if (hs) startCloseOnceHubspotIsSeen();
-    };
-
-    // Watch for HubSpot being injected
-    var obs = new MutationObserver(function () {
-      try { apply(); } catch (e) {}
-    });
-
-    if (document.body) {
-      obs.observe(document.body, { childList: true, subtree: true });
+        if (tries >= maxTries) {
+          clearInterval(timer);
+        }
+      }, 150);
     }
 
-    apply();
+    function handleMaybeTransition() {
+      var el = getPushAnchor();
+      if (!el) return;
+
+      var open = isHsOpenByPushAnchor(el);
+
+      if (lastOpen === null) {
+        lastOpen = open;
+        return;
+      }
+
+      // Transition: OPEN -> CLOSED
+      if (lastOpen === true && open === false) {
+        // Click native close right after HS "go*" class disappears
+        closeNativeNotificationsAfterHsClose();
+      }
+
+      lastOpen = open;
+    }
+
+    // Observe for push anchor existence + class changes
+    var obs = new MutationObserver(function (mutations) {
+      try {
+        for (var i = 0; i < mutations.length; i++) {
+          var m = mutations[i];
+
+          // If the push anchor is added, start tracking state immediately
+          if (m.type === "childList") {
+            handleMaybeTransition();
+          }
+
+          // If class changes on the anchor, check for open->closed transition
+          if (m.type === "attributes") {
+            if (m.target && m.target.id === HS_PUSH_ANCHOR_ID) {
+              handleMaybeTransition();
+            }
+          }
+        }
+      } catch (e) {}
+    });
+
+    obs.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class"]
+    });
+
+    // Initial state check
+    handleMaybeTransition();
   } catch (e) {}
 })();
