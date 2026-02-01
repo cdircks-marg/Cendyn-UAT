@@ -52,6 +52,10 @@ html body {
         max-height: 60vh;
       }
     }
+    .countdown-timer-bar-show #photos {
+      margin-top: 58px;
+      height: calc(100% - 84px);
+    }
   }
 
   /* Tablet */
@@ -71,5 +75,13 @@ html body {
         max-height: 80vh;
       }
     }
+  }
+
+  .search-modal {
+    z-index: 10000;
+  }
+
+  html.home.mobile .mobile-only {
+    margin-top: 62px;
   }
 }
