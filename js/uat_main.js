@@ -65,33 +65,16 @@
     };
 
     //******************************************
-    // Remove inline display style from countdown promo so CSS can win (cleanup)
+    // Hard-hide BOTH notification containers after HS close (wins reliably)
     //******************************************
-    var removeInlineDisplayFromCountdownPromo = function () {
+    var hideNotificationContainersHard = function () {
       try {
-        var nodes = document.querySelectorAll(
-          ".notifications .notification.countdown-promo," +
-          ".url_notifications .notification.countdown-promo"
-        );
-        for (var i = 0; i < nodes.length; i++) {
-          nodes[i].style.removeProperty("display");
-        }
-      } catch (e) {}
-    };
-
-    //******************************************
-    // Hard-hide ONLY the countdown promo after dismissal (wins vs inline display:block)
-    //******************************************
-    var hideCountdownPromoHard = function () {
-      try {
-        var style = document.getElementById("uat-hide-countdown-promo");
+        var style = document.getElementById("uat-hide-notification-containers");
         if (!style) {
           style = document.createElement("style");
-          style.id = "uat-hide-countdown-promo";
+          style.id = "uat-hide-notification-containers";
           style.textContent =
-            ".notifications .notification.countdown-promo," +
-            ".url_notifications .notification.countdown-promo" +
-            "{ display: none !important; }";
+            ".notifications, .url_notifications { display: none !important; }";
           document.head.appendChild(style);
         }
       } catch (e) {}
@@ -102,15 +85,12 @@
       var open = !!(hs && isHubspotOpen(hs));
 
       //******************************************
-      // HS just closed → dismiss native countdown promo once
+      // HS just closed → dismiss native countdown promo once + hide bar
       //******************************************
       if (!open && lastHsOpen) {
         closeNativeCountdownPromoIfPresent();
         setNativePromoDisabledCookieFromDom();
-
-        // Ensure it cannot be forced visible by inline styles
-        removeInlineDisplayFromCountdownPromo();
-        hideCountdownPromoHard();
+        hideNotificationContainersHard();
       }
 
       lastHsOpen = open;
