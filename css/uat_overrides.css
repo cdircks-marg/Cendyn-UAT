@@ -1,87 +1,91 @@
-html body {
-  @media only screen and (max-width: 767px) {
-    .notifications .countdown-promo .info {
-      min-height: auto;
-      padding: 0px 0 12px 0px;
-      justify-content: space-between;
-    }
-    .notifications .countdown-promo .info .image {
-      display: none;
-    }
-    .notifications .countdown-promo .info .link {
-      margin-right: 0;
-      width: 100%;
-    }
-    .notifications .countdown-promo .promo-counter .counter > div .value {
-      position: relative;
-      height: 30px;
-      line-height: 30px;
-      font-size: 20px;
-      font-weight: 400;
-      letter-spacing: 1px;
-    }
-    .notifications .countdown-promo .description .promo-heading {
-      margin-bottom: 5px;
-      margin-top: -6px;
-      line-height: 15px;
-      letter-spacing: 1px;
-      font-weight: 500;
-      font-size: 16px;
-    }
+html body .home.mobile .mobile-only {
+  margin-top: 62px;
+}
 
-    .notifications .countdown-promo .description p {
-      font-size: 16px;
-      line-height: 18px;
-      font-weight: 400;
-    }
+@media only screen and (max-width: 767px) {
+  html body .notifications .countdown-promo .info {
+    min-height: auto;
+    padding: 0 0 12px 0;
+    justify-content: space-between;
+  }
+  html body .notifications .countdown-promo .info .image {
+    display: none;
+  }
+  html body .notifications .countdown-promo .info .link {
+    margin-right: 0;
+    width: 100%;
+  }
+  html
+    body
+    .notifications
+    .countdown-promo
+    .promo-counter
+    .counter
+    > div
+    .value {
+    position: relative;
+    height: 30px;
+    line-height: 30px;
+    font-size: 20px;
+    font-weight: 400;
+    letter-spacing: 1px;
+  }
+  html body .notifications .countdown-promo .description .promo-heading {
+    margin-bottom: 5px;
+    margin-top: -6px;
+    line-height: 15px;
+    letter-spacing: 1px;
+    font-weight: 500;
+    font-size: 16px;
+  }
+  html body .notifications .countdown-promo .description p {
+    font-size: 16px;
+    line-height: 18px;
+    font-weight: 400;
+  }
 
-    #photos {
-      margin-top: 90px;
-      height: 350px;
-      min-height: 350px;
-      max-height: 350px;
-    }
-    .object-fit {
-      height: 350px;
-    }
+  html body #photos {
+    margin-top: 90px;
+    height: 350px;
+    min-height: 350px;
+    max-height: 350px;
+  }
+  html body .object-fit {
+    height: 350px;
+  }
 
-    /* iOS safety floor */
-    @supports (-webkit-touch-callout: none) {
-      #photos {
-        min-height: max(350px, 60vh);
-        max-height: 60vh;
-      }
-    }
-    .countdown-timer-bar-show #photos {
-      margin-top: 58px;
-      height: calc(100% - 84px);
+  /* iOS safety floor */
+  @supports (-webkit-touch-callout: none) {
+    html body #photos {
+      min-height: max(350px, 60vh);
+      max-height: 60vh;
     }
   }
 
-  /* Tablet */
-  @media (min-width: 768px) and (max-width: 1024px) {
-    #photos {
-      height: 500px;
-      min-height: 500px;
-      max-height: 500px;
-    }
-    .object-fit {
-      height: 500px;
-    }
+  html body .countdown-timer-bar-show #photos {
+    margin-top: 58px;
+    height: calc(100% - 84px);
+  }
+}
 
-    @supports (-webkit-touch-callout: none) {
-      #photos {
-        min-height: max(500px, 80vh);
-        max-height: 80vh;
-      }
-    }
+@media (min-width: 768px) and (max-width: 1024px) {
+  html body #photos {
+    height: 500px;
+    min-height: 500px;
+    max-height: 500px;
+  }
+  html body .object-fit {
+    height: 500px;
   }
 
-  .search-modal {
-    z-index: 10000;
+  @supports (-webkit-touch-callout: none) {
+    html body #photos {
+      min-height: max(500px, 80vh);
+      max-height: 80vh;
+    }
   }
+}
 
-  html.home.mobile .mobile-only {
-    margin-top: 62px;
-  }
+html body .search-modal {
+  z-index: 10000;
 }
