@@ -24,12 +24,13 @@
     };
 
     //******************************************
-    // Close native notification via its real close button
+    // Close native countdown promo via its real close button
     //******************************************
-    var closeNativeNotificationIfPresent = function () {
+    var closeNativeCountdownPromoIfPresent = function () {
       try {
         var btn = document.querySelector(
-          ".notifications .notification button.close, .url_notifications .notification button.close"
+          ".notifications .notification.countdown-promo button.close," +
+          ".url_notifications .notification.countdown-promo button.close"
         );
         if (btn) btn.click();
       } catch (e) {}
@@ -42,7 +43,8 @@
     var setNativePromoDisabledCookieFromDom = function () {
       try {
         var notif = document.querySelector(
-          ".notifications .notification[data-id], .url_notifications .notification[data-id]"
+          ".notifications .notification.countdown-promo[data-id]," +
+          ".url_notifications .notification.countdown-promo[data-id]"
         );
         if (!notif) return;
 
@@ -63,16 +65,33 @@
     };
 
     //******************************************
-    // Hard-hide individual notifications after dismissal (visual safety net)
+    // Remove inline display style from countdown promo so CSS can win (cleanup)
     //******************************************
-    var hideNotificationsHard = function () {
+    var removeInlineDisplayFromCountdownPromo = function () {
       try {
-        var style = document.getElementById("uat-hide-native-notifications");
+        var nodes = document.querySelectorAll(
+          ".notifications .notification.countdown-promo," +
+          ".url_notifications .notification.countdown-promo"
+        );
+        for (var i = 0; i < nodes.length; i++) {
+          nodes[i].style.removeProperty("display");
+        }
+      } catch (e) {}
+    };
+
+    //******************************************
+    // Hard-hide ONLY the countdown promo after dismissal (wins vs inline display:block)
+    //******************************************
+    var hideCountdownPromoHard = function () {
+      try {
+        var style = document.getElementById("uat-hide-countdown-promo");
         if (!style) {
           style = document.createElement("style");
-          style.id = "uat-hide-native-notifications";
+          style.id = "uat-hide-countdown-promo";
           style.textContent =
-            ".notifications .notification, .url_notifications .notification { display: none !important; }";
+            ".notifications .notification.countdown-promo," +
+            ".url_notifications .notification.countdown-promo" +
+            "{ display: none !important; }";
           document.head.appendChild(style);
         }
       } catch (e) {}
@@ -83,12 +102,15 @@
       var open = !!(hs && isHubspotOpen(hs));
 
       //******************************************
-      // HS just closed → dismiss native promo once
+      // HS just closed → dismiss native countdown promo once
       //******************************************
       if (!open && lastHsOpen) {
-        closeNativeNotificationIfPresent();
+        closeNativeCountdownPromoIfPresent();
         setNativePromoDisabledCookieFromDom();
-        hideNotificationsHard();
+
+        // Ensure it cannot be forced visible by inline styles
+        removeInlineDisplayFromCountdownPromo();
+        hideCountdownPromoHard();
       }
 
       lastHsOpen = open;
@@ -102,7 +124,7 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["class"]
+      attributeFilter: ["class", "style"]
     });
 
     apply();
