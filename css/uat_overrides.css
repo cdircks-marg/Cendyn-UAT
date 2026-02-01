@@ -1,7 +1,3 @@
-html body .home.mobile .mobile-only {
-  margin-top: 62px;
-}
-
 @media only screen and (max-width: 767px) {
   html body .notifications .countdown-promo .info {
     min-height: auto;
@@ -45,7 +41,6 @@ html body .home.mobile .mobile-only {
   }
 
   html body #photos {
-    margin-top: 90px;
     height: 350px;
     min-height: 350px;
     max-height: 350px;
