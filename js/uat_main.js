@@ -10,6 +10,8 @@
     //    - Clear our --notification-height override (hand control back to native)
     //    - Trigger native notification close button (so native removes classes + sets its cookie)
     //    - Also set promo-<data-id>=disabled as a backup
+    // - When native notification closes (HS closed):
+    //    - Force header back to top and nudge --notification-height to 0 briefly
     // - Registers cleanup hook for main.js
     //******************************************
 
@@ -28,8 +30,12 @@
     var lastHsOpen = false;
 
     //******************************************
+    // Track whether HS is currently open (so native close handler doesn't fight HS)
+    //******************************************
+    var hsCurrentlyOpen = false; // 👈 ADD THIS
+
+    //******************************************
     // HubSpot banner "open" state is indicated by hs-cta-embed__loaded AND >= 2 go* classes.
-    // When it closes, HubSpot removes the last go* class.
     //******************************************
     var isHubspotBannerActiveByClass = function (el) {
       try {
@@ -53,7 +59,6 @@
       var topAnchor = document.getElementById(HS_TOP_ANCHOR_ID);
       if (!topAnchor) return null;
 
-      // Find the top banner container (NOT the popup)
       var el = topAnchor.querySelector(
         'div[id^="hs-overlay-cta-"]:not([role="dialog"]):not([aria-modal="true"])'
       );
@@ -103,6 +108,30 @@
     var clearNotifVar = function () {
       try {
         document.documentElement.style.removeProperty(NOTIF_VAR);
+      } catch (e) {}
+    };
+
+    //******************************************
+    // Force header back up after native close (one-time nudge)
+    //******************************************
+    var normalizeHeaderAfterNativeClose = function () { // 👈 ADD THIS
+      try {
+        // Nudge var to 0 so any calc(top: var(--notification-height)) settles immediately
+        setNotifVar(0);
+
+        // Set inline top to 0 as an immediate visual correction
+        var header = document.querySelector("#header.navipandora");
+        if (header) header.style.top = "0px";
+
+        // Then hand control back to native CSS (remove inline + remove var)
+        requestAnimationFrame(function () {
+          try {
+            if (header) header.style.removeProperty("top");
+          } catch (e) {}
+          try {
+            clearNotifVar();
+          } catch (e) {}
+        });
       } catch (e) {}
     };
 
@@ -167,29 +196,26 @@
         var h = measureElHeight(bannerContainer);
         var open = !!(isHubspotBannerActiveByClass(bannerContainer) && h > 0);
 
+        //******************************************
+        // Track HS open state globally
+        //******************************************
+        hsCurrentlyOpen = !!open; // 👈 ADD THIS
+
         if (open) {
-          //******************************************
-          // HS open: hide native notifications and let native CSS use --notification-height
-          //******************************************
           var style = ensureStyleTag();
           style.textContent = ".notifications{ display:none; }\n";
           setNotifVar(h);
         } else {
-          //******************************************
-          // HS closed: show native notifications again and return control to native calculations
-          //******************************************
           clearStyleTag();
           clearNotifVar();
 
-          //******************************************
-          // If HS just transitioned open -> closed, close native promo (so it cleans up its classes)
-          //******************************************
           if (lastHsOpen === true) {
-            // Close it the "native" way
             closeNativeNotificationIfPresent();
-
-            // Backup: set the same cookie native uses (promo-<id>=disabled)
             setNativePromoDisabledCookieFromDom();
+            //******************************************
+            // Also normalize header immediately after HS closes (covers stuck states)
+            //******************************************
+            normalizeHeaderAfterNativeClose(); // 👈 ADD THIS
           }
         }
 
@@ -198,12 +224,14 @@
       }
 
       // ---- NO HUBSPOT ----
-      //******************************************
-      // No HS on page: allow native notifications 100% (no hide, no var override)
-      //******************************************
       clearStyleTag();
       clearNotifVar();
       lastHsOpen = false;
+
+      //******************************************
+      // If HS isn't even on the page, it's definitely not open.
+      //******************************************
+      hsCurrentlyOpen = false; // 👈 ADD THIS
     };
 
     //******************************************
@@ -269,6 +297,33 @@
       } catch (e) {}
       raf1 = null;
       raf2 = null;
+
+      //******************************************
+      // Remove click handler
+      //******************************************
+      try { document.removeEventListener("click", onDocClick, true); } catch (e) {} // 👈 ADD THIS
+    };
+
+    //******************************************
+    // Native notification close handler (event delegation)
+    // - Only runs when HS is NOT open
+    // - After native close click, normalize header back up
+    //******************************************
+    var onDocClick = function (e) { // 👈 ADD THIS
+      try {
+        if (hsCurrentlyOpen) return; // don't fight HS layout
+        var t = e && e.target;
+        if (!t) return;
+
+        // Find a close button click anywhere inside the native notification close button
+        var btn = (t.closest && t.closest(".notifications .notification button.close")) || null;
+        if (!btn) return;
+
+        // Let native close logic run first, then normalize header/layout
+        setTimeout(function () {
+          try { normalizeHeaderAfterNativeClose(); } catch (e) {}
+        }, 0);
+      } catch (e) {}
     };
 
     //******************************************
@@ -282,6 +337,11 @@
 
     // Start
     startObserver();
+
+    //******************************************
+    // Listen for native close clicks globally
+    //******************************************
+    document.addEventListener("click", onDocClick, true); // 👈 ADD THIS
 
     // If main.js broadcasts mode changes, clean up when switching away
     window.addEventListener("uat:mode", function (ev) {
