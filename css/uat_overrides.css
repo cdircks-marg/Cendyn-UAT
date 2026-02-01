@@ -84,7 +84,7 @@ html body .search-modal {
 html body #header.navipandora.navipandora--offset {
   top: 0px !important;
 }
-html.hs-closed-hide-countdown .notifications .notification.countdown-promo,
-html.hs-closed-hide-countdown .url_notifications .notification.countdown-promo {
+html body .notifications.hs-found-hide,
+html body .url_notifications.hs-found-hide {
   display: none !important;
 }
