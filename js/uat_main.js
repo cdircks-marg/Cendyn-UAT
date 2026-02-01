@@ -2,7 +2,9 @@
   try {
     var HS_PUSH_ANCHOR_ID = "hs-web-interactives-top-push-anchor";
     var lastGoCount = null;
-    var didRun = false;
+    var armed = false;
+
+    var notifObs = null;
 
     function getAnchor() {
       return document.getElementById(HS_PUSH_ANCHOR_ID);
@@ -34,9 +36,8 @@
       } catch (e) {}
     }
 
-    function setPromoDisabledCookieFromDom() {
+    function setCookieFromAnyCountdownPromo() {
       try {
-        // Countdown promo is the one that has data-id
         var promo = document.querySelector(
           ".notifications .notification.countdown-promo[data-id], .url_notifications .notification.countdown-promo[data-id]"
         );
@@ -49,8 +50,11 @@
       } catch (e) {}
     }
 
-    function deleteNotificationChildren() {
+    function clearNotificationContainers() {
       try {
+        // set cookie BEFORE clearing (so we still can read data-id)
+        setCookieFromAnyCountdownPromo();
+
         var containers = document.querySelectorAll(".notifications, .url_notifications");
         for (var i = 0; i < containers.length; i++) {
           var c = containers[i];
@@ -59,34 +63,31 @@
       } catch (e) {}
     }
 
-    // After HS closes, notifications/promo may be injected slightly later.
-    // Retry a few times to ensure we catch the promo data-id for cookie + clear DOM.
-    function enforceForMs(ms) {
-      var end = Date.now() + ms;
-      var timer = null;
+    function startKeepingNotificationsEmpty() {
+      if (notifObs) return;
 
-      var tick = function () {
-        try {
-          setPromoDisabledCookieFromDom();
-          deleteNotificationChildren();
-        } catch (e) {}
+      // Clear immediately once
+      clearNotificationContainers();
 
-        if (Date.now() < end) {
-          timer = setTimeout(tick, 150);
+      notifObs = new MutationObserver(function () {
+        // Any time something is injected back in, wipe it again
+        clearNotificationContainers();
+      });
+
+      // Observe only the notification containers (more efficient than whole document)
+      // If containers don't exist yet, observe document until they do.
+      var containers = document.querySelectorAll(".notifications, .url_notifications");
+      if (containers && containers.length) {
+        for (var i = 0; i < containers.length; i++) {
+          notifObs.observe(containers[i], { childList: true, subtree: false });
         }
-      };
-
-      tick();
-      return function () {
-        try { if (timer) clearTimeout(timer); } catch (e) {}
-      };
+      } else {
+        // Fallback: observe the doc and clear when containers appear
+        notifObs.observe(document.documentElement, { childList: true, subtree: true });
+      }
     }
 
-    var stopEnforce = null;
-
-    function applyIfHsClosed() {
-      if (didRun) return;
-
+    function onHsStateCheck() {
       var anchor = getAnchor();
       if (!anchor) return;
 
@@ -97,29 +98,26 @@
         return;
       }
 
-      // HS CLOSED: went from 2+ go* classes → exactly 1
-      if (lastGoCount >= 2 && goCount === 1) {
-        didRun = true;
-
-        // Run immediately + for a short window to catch late-injected promos
-        if (stopEnforce) { try { stopEnforce(); } catch (e) {} }
-        stopEnforce = enforceForMs(4000);
+      // HS closed signal: went from 2+ go* classes -> exactly 1
+      if (!armed && lastGoCount >= 2 && goCount === 1) {
+        armed = true;
+        startKeepingNotificationsEmpty();
       }
 
       lastGoCount = goCount;
     }
 
-    var obs = new MutationObserver(function () {
-      try { applyIfHsClosed(); } catch (e) {}
+    var hsObs = new MutationObserver(function () {
+      try { onHsStateCheck(); } catch (e) {}
     });
 
-    obs.observe(document.documentElement, {
+    hsObs.observe(document.documentElement, {
       childList: true,
       subtree: true,
       attributes: true,
       attributeFilter: ["class"]
     });
 
-    applyIfHsClosed();
+    onHsStateCheck();
   } catch (e) {}
 })();
