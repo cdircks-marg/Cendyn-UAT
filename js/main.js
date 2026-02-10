@@ -15,6 +15,18 @@
     };
 
     var SS_KEY = "uat_enabled_session";
+    //******************************************
+    // NEW: localStorage persistence key
+    //******************************************
+    var LS_KEY = "uat_enabled_local";
+
+    //******************************************
+    // NEW: optional prefixes for “UAT-owned” storage keys to clear on OFF
+    // Keep this tight so we don’t nuke unrelated app storage.
+    // If your uat_main.js writes keys like "uat_*" or "UAT_*" add them here.
+    //******************************************
+    var UAT_STORAGE_PREFIXES = ["uat_", "UAT_", "cendyn_uat_", "CENDYN_UAT_"];
+
     var MODE_CSS_ID = "main-mode-css-link";
     var MODE_JS_ID  = "main-mode-js-script";
 
@@ -28,19 +40,6 @@
       return (params.get("UAT") || params.get("uat") || "").toLowerCase();
     };
 
-    var setEnabled = function (enabled) {
-      if (enabled) sessionStorage.setItem(SS_KEY, "1");
-      else sessionStorage.removeItem(SS_KEY);
-    };
-
-    var isEnabled = function () {
-      return sessionStorage.getItem(SS_KEY) === "1";
-    };
-
-    var currentMode = function () {
-      return isEnabled() ? "uat" : "prod";
-    };
-
     //******************************************
     // Cleanup hook called when switching away from UAT
     //******************************************
@@ -51,6 +50,76 @@
         }
       } catch (e) {}
       try { window.__UAT_MODE_CLEANUP__ = null; } catch (e) {}
+    };
+
+    //******************************************
+    // NEW: targeted storage clearing helpers
+    //******************************************
+    var clearStorageByPrefixes = function (storage, prefixes) {
+      try {
+        if (!storage || !prefixes || !prefixes.length) return;
+
+        var keys = [];
+        for (var i = 0; i < storage.length; i++) {
+          var k = storage.key(i);
+          if (k) keys.push(k);
+        }
+
+        for (var j = 0; j < keys.length; j++) {
+          var key = keys[j];
+          for (var p = 0; p < prefixes.length; p++) {
+            if (key.indexOf(prefixes[p]) === 0) {
+              try { storage.removeItem(key); } catch (e) {}
+              break;
+            }
+          }
+        }
+      } catch (e) {}
+    };
+
+    //******************************************
+    // NEW: central enable/disable that persists to BOTH session + local storage
+    // enabled=true  => persists across navigation
+    // enabled=false => clears flags + UAT-owned cached values
+    //******************************************
+    var setEnabled = function (enabled) {
+      try {
+        if (enabled) {
+          // Session + local persist
+          try { sessionStorage.setItem(SS_KEY, "1"); } catch (e) {}
+          try { localStorage.setItem(LS_KEY, "1"); } catch (e) {}
+        } else {
+          // Run cleanup before clearing UAT-related storage
+          runUatCleanupIfPresent();
+
+          // Remove flags
+          try { sessionStorage.removeItem(SS_KEY); } catch (e) {}
+          try { localStorage.removeItem(LS_KEY); } catch (e) {}
+
+          // Clear only UAT-owned keys (safe/scoped)
+          clearStorageByPrefixes(localStorage, UAT_STORAGE_PREFIXES);
+          clearStorageByPrefixes(sessionStorage, UAT_STORAGE_PREFIXES);
+        }
+      } catch (e) {}
+    };
+
+    //******************************************
+    // NEW: enabled if either session OR local says enabled
+    // localStorage is what keeps it on across link clicks / navigations
+    //******************************************
+    var isEnabled = function () {
+      try {
+        var ss = false;
+        var ls = false;
+        try { ss = sessionStorage.getItem(SS_KEY) === "1"; } catch (e) {}
+        try { ls = localStorage.getItem(LS_KEY) === "1"; } catch (e) {}
+        return ss || ls;
+      } catch (e) {}
+      return false;
+    };
+
+    var currentMode = function () {
+      return isEnabled() ? "uat" : "prod";
     };
 
     //******************************************
@@ -163,7 +232,7 @@
 
       btn.addEventListener("click", function () {
         try {
-          // switch off UAT
+          // switch off UAT (also clears local+session + UAT-owned keys)
           setEnabled(false);
 
           // swap assets + cleanup uat-only logic via main loader
@@ -226,10 +295,22 @@
       });
     };
 
+    //******************************************
     // Param-driven state update (initial)
+    //******************************************
     var p0 = getUatParam();
     if (p0 === "on") setEnabled(true);
     if (p0 === "off") setEnabled(false);
+
+    //******************************************
+    // NEW: If there is NO param, honor persisted localStorage flag by
+    // restoring session storage for this tab (helps any code relying on SS_KEY)
+    //******************************************
+    try {
+      if (!p0 && isEnabled()) {
+        try { sessionStorage.setItem(SS_KEY, "1"); } catch (e) {}
+      }
+    } catch (e) {}
 
     hookHistory();
 

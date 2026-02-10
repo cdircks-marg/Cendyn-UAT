@@ -3,9 +3,7 @@
     var HS_PUSH_ANCHOR_ID = "hs-web-interactives-top-push-anchor";
     var lastGoCount = null;
     var armed = false;
-
     var lockObs = null;
-
     function getAnchor() {
       return document.getElementById(HS_PUSH_ANCHOR_ID);
     }

@@ -1,4 +1,11 @@
 @media only screen and (max-width: 767px) {
+  html body .footer .footer-menu ul li {
+    width: 100%;
+  }
+  html body .footer .footer-menu {
+    background: white;
+  }
+
   html body .notifications .countdown-promo .info {
     min-height: auto;
     padding: 0 0 12px 0;
@@ -87,4 +94,12 @@ html body #header.navipandora.navipandora--offset {
 html body .notifications.hs-found-hide,
 html body .url_notifications.hs-found-hide {
   display: none !important;
+}
+
+html body .footer .footer-top-bar {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 20px 30px 20px;
+  background: white;
+  padding-top: 25px;
 }
