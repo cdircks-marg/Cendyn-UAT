@@ -3,41 +3,95 @@
     //******************************************
     // CONFIG
     //******************************************
-    var ASSETS = {
-      uat: {
-        css: "https://cdn.jsdelivr.net/gh/cdircks-marg/Cendyn-UAT/css/uat_overrides.css",
-        js:  "https://cdn.jsdelivr.net/gh/cdircks-marg/Cendyn-UAT/js/uat_main.js"
+    // jsDelivr format:
+    // https://cdn.jsdelivr.net/gh/USERNAME/REPO@BRANCH/path/to/file.ext
+    var REPO = "cdircks-marg/Cendyn-UAT";
+    var CDN  = "https://cdn.jsdelivr.net/gh/" + REPO + "@";
+
+    //******************************************
+    // 1 overrides file total (same file name for both modes)
+    // - PROD loads from @main branch
+    // - UAT loads from @uat branch
+    //******************************************
+    var BRANCH_BY_MODE = { uat: "uat", prod: "main" };
+
+    //******************************************
+    // Domain-specific assets
+    //******************************************
+    var DOMAIN_ASSETS = {
+      "www.margaritavilleatsea.com": {
+        css: [
+          "css/tailwind.css",
+          "css/slideshow.css",
+          "css/footer.css",
+          //******************************************
+          // One overrides file for BOTH uat/prod (branch controls which version)
+          //******************************************
+          "css/cms-overrides.css"
+        ],
+        js: []
       },
-      prod: {
-        css: "https://cdn.jsdelivr.net/gh/cdircks-marg/Cendyn-UAT/css/prod_overrides.css",
-        js:  "https://cdn.jsdelivr.net/gh/cdircks-marg/Cendyn-UAT/js/prod_main.js"
+      "reservations.margaritavilleatsea.com": {
+        css: [
+          //******************************************
+          // One overrides file for BOTH uat/prod (branch controls which version)
+          //******************************************
+          "css/booking-overrides.css"
+        ],
+        js: [
+          "js/booking-filter.js"
+        ]
       }
     };
 
+    //******************************************
+    // Storage keys
+    //******************************************
     var SS_KEY = "uat_enabled_session";
-    //******************************************
-    // NEW: localStorage persistence key
-    //******************************************
     var LS_KEY = "uat_enabled_local";
 
     //******************************************
-    // NEW: optional prefixes for “UAT-owned” storage keys to clear on OFF
-    // Keep this tight so we don’t nuke unrelated app storage.
-    // If your uat_main.js writes keys like "uat_*" or "UAT_*" add them here.
+    // Optional prefixes for “UAT-owned” storage keys to clear on OFF
+    // Keep this tight.
     //******************************************
     var UAT_STORAGE_PREFIXES = ["uat_", "UAT_", "cendyn_uat_", "CENDYN_UAT_"];
 
-    var MODE_CSS_ID = "main-mode-css-link";
-    var MODE_JS_ID  = "main-mode-js-script";
-
+    //******************************************
+    // Badge (only in UAT)
+    //******************************************
     var BADGE_ID = "uat-toggle-badge";
     var LOGO_SELECTOR = 'a.logo.property-no-own[href="/"]';
 
     var obs = null;
 
+    //******************************************
+    // Helpers
+    //******************************************
     var getUatParam = function () {
       var params = new URLSearchParams(window.location.search);
       return (params.get("UAT") || params.get("uat") || "").toLowerCase();
+    };
+
+    var isEnabled = function () {
+      try {
+        var ss = false, ls = false;
+        try { ss = sessionStorage.getItem(SS_KEY) === "1"; } catch (e) {}
+        try { ls = localStorage.getItem(LS_KEY) === "1"; } catch (e) {}
+        return ss || ls;
+      } catch (e) {}
+      return false;
+    };
+
+    var currentMode = function () {
+      return isEnabled() ? "uat" : "prod";
+    };
+
+    var currentBranch = function () {
+      return BRANCH_BY_MODE[currentMode()] || "main";
+    };
+
+    var cdnUrl = function (path) {
+      return CDN + encodeURIComponent(currentBranch()) + "/" + path;
     };
 
     //******************************************
@@ -52,9 +106,6 @@
       try { window.__UAT_MODE_CLEANUP__ = null; } catch (e) {}
     };
 
-    //******************************************
-    // NEW: targeted storage clearing helpers
-    //******************************************
     var clearStorageByPrefixes = function (storage, prefixes) {
       try {
         if (!storage || !prefixes || !prefixes.length) return;
@@ -78,25 +129,18 @@
     };
 
     //******************************************
-    // NEW: central enable/disable that persists to BOTH session + local storage
-    // enabled=true  => persists across navigation
-    // enabled=false => clears flags + UAT-owned cached values
+    // Central enable/disable persists to BOTH session + local storage
     //******************************************
     var setEnabled = function (enabled) {
       try {
         if (enabled) {
-          // Session + local persist
           try { sessionStorage.setItem(SS_KEY, "1"); } catch (e) {}
           try { localStorage.setItem(LS_KEY, "1"); } catch (e) {}
         } else {
-          // Run cleanup before clearing UAT-related storage
           runUatCleanupIfPresent();
-
-          // Remove flags
           try { sessionStorage.removeItem(SS_KEY); } catch (e) {}
           try { localStorage.removeItem(LS_KEY); } catch (e) {}
 
-          // Clear only UAT-owned keys (safe/scoped)
           clearStorageByPrefixes(localStorage, UAT_STORAGE_PREFIXES);
           clearStorageByPrefixes(sessionStorage, UAT_STORAGE_PREFIXES);
         }
@@ -104,75 +148,76 @@
     };
 
     //******************************************
-    // NEW: enabled if either session OR local says enabled
-    // localStorage is what keeps it on across link clicks / navigations
+    // Asset injection
+    // - We inject multiple CSS files and (optionally) JS files
+    // - IDs are deterministic so re-run swaps branch URLs cleanly
     //******************************************
-    var isEnabled = function () {
+    var ensureCss = function (id, href) {
       try {
-        var ss = false;
-        var ls = false;
-        try { ss = sessionStorage.getItem(SS_KEY) === "1"; } catch (e) {}
-        try { ls = localStorage.getItem(LS_KEY) === "1"; } catch (e) {}
-        return ss || ls;
-      } catch (e) {}
-      return false;
-    };
+        var el = document.getElementById(id);
+        if (el && el.getAttribute("href") === href) return;
 
-    var currentMode = function () {
-      return isEnabled() ? "uat" : "prod";
-    };
-
-    //******************************************
-    // Asset loaders
-    //******************************************
-    var addModeCss = function (mode) {
-      try {
-        var url = (ASSETS[mode] && ASSETS[mode].css) || "";
-        if (!url) return;
-
-        var existing = document.getElementById(MODE_CSS_ID);
-        if (existing && existing.getAttribute("href") === url) return;
-
-        if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+        if (el && el.parentNode) el.parentNode.removeChild(el);
 
         var link = document.createElement("link");
-        link.id = MODE_CSS_ID;
+        link.id = id;
         link.rel = "stylesheet";
-        link.href = url;
+        link.href = href;
         document.head.appendChild(link);
       } catch (e) {}
     };
 
-    var addModeJs = function (mode) {
+    var ensureJs = function (id, src) {
       try {
-        var url = (ASSETS[mode] && ASSETS[mode].js) || "";
-        if (!url) return;
+        var el = document.getElementById(id);
+        if (el && el.getAttribute("src") === src) return;
 
-        var existing = document.getElementById(MODE_JS_ID);
-        if (existing && existing.getAttribute("src") === url) return;
-
-        // If leaving UAT, cleanup before removing UAT script
-        if (existing && existing.getAttribute("src") === (ASSETS.uat && ASSETS.uat.js)) {
-          runUatCleanupIfPresent();
+        // If removing a prior UAT-owned script, run cleanup first
+        if (el) {
+          try { runUatCleanupIfPresent(); } catch (e) {}
         }
 
-        if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+        if (el && el.parentNode) el.parentNode.removeChild(el);
 
         var s = document.createElement("script");
-        s.id = MODE_JS_ID;
-        s.src = url;
+        s.id = id;
+        s.src = src;
         s.async = true;
         document.head.appendChild(s);
       } catch (e) {}
     };
 
-    var applyModeAssets = function () {
-      var mode = currentMode();
-      addModeCss(mode);
-      addModeJs(mode);
-
+    var applyDomainAssets = function () {
       try {
-        window.dispatchEvent(new CustomEvent("uat:mode", { detail: { mode: mode } }));
+        var host = (window.location.hostname || "").toLowerCase();
+        var cfg = DOMAIN_ASSETS[host];
+
+        // If not one of the supported hosts, do nothing (safe)
+        if (!cfg) return;
+
+        // CSS
+        var css = cfg.css || [];
+        for (var i = 0; i < css.length; i++) {
+          //******************************************
+          // deterministic id, based on index + filename
+          //******************************************
+          var id = "mode-css-" + i + "-" + css[i].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+          ensureCss(id, cdnUrl(css[i]));
+        }
+
+        // JS
+        var js = cfg.js || [];
+        for (var j = 0; j < js.length; j++) {
+          var jid = "mode-js-" + j + "-" + js[j].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+          ensureJs(jid, cdnUrl(js[j]));
+        }
+
+        //******************************************
+        // Tell downstream scripts which mode is active
+        //******************************************
+        try {
+          window.dispatchEvent(new CustomEvent("uat:mode", { detail: { mode: currentMode(), host: host } }));
+        } catch (e) {}
       } catch (e) {}
     };
 
@@ -185,15 +230,15 @@
     };
 
     var injectBadgeIfEnabled = function () {
-      //******************************************
-      // Only show badge in UAT
-      //******************************************
       if (!isEnabled()) {
         removeBadge();
         return;
       }
-
       if (document.getElementById(BADGE_ID)) return;
+
+      // Only show on www.margaritavilleatsea.com (safe)
+      var host = (window.location.hostname || "").toLowerCase();
+      if (host !== "www.margaritavilleatsea.com") return;
 
       var logo = document.querySelector(LOGO_SELECTOR);
       if (!logo) return;
@@ -232,16 +277,14 @@
 
       btn.addEventListener("click", function () {
         try {
-          // switch off UAT (also clears local+session + UAT-owned keys)
           setEnabled(false);
 
-          // swap assets + cleanup uat-only logic via main loader
-          applyModeAssets();
+          // swap assets (loads @main versions)
+          applyDomainAssets();
 
-          // remove badge immediately
           removeBadge();
 
-          // Optional: remove UAT param from URL (no reload)
+          // remove URL param (no reload)
           var url = new URL(window.location.href);
           url.searchParams.delete("UAT");
           url.searchParams.delete("uat");
@@ -259,9 +302,6 @@
       var root = document.querySelector("#header") || document.documentElement;
 
       obs = new MutationObserver(function () {
-        //******************************************
-        // Keep badge ONLY if enabled; remove if not
-        //******************************************
         injectBadgeIfEnabled();
       });
 
@@ -296,15 +336,14 @@
     };
 
     //******************************************
-    // Param-driven state update (initial)
+    // Initial param-driven state
     //******************************************
     var p0 = getUatParam();
     if (p0 === "on") setEnabled(true);
     if (p0 === "off") setEnabled(false);
 
     //******************************************
-    // NEW: If there is NO param, honor persisted localStorage flag by
-    // restoring session storage for this tab (helps any code relying on SS_KEY)
+    // If no param, honor persisted localStorage and restore session for this tab
     //******************************************
     try {
       if (!p0 && isEnabled()) {
@@ -319,12 +358,12 @@
       if (p === "on") setEnabled(true);
       if (p === "off") setEnabled(false);
 
-      applyModeAssets();
+      applyDomainAssets();
       injectBadgeIfEnabled();
     });
 
     // Initial run
-    applyModeAssets();
+    applyDomainAssets();
     injectBadgeIfEnabled();
     startObserver();
 
