@@ -24,22 +24,17 @@
           "css/tailwind.css",
           "css/slideshow.css",
           "css/footer.css",
-          //******************************************
-          // One overrides file for BOTH uat/prod (branch controls which version)
-          //******************************************
           "css/cms-overrides.css"
         ],
         js: []
       },
       "reservations.margaritavilleatsea.com": {
         css: [
-          //******************************************
-          // One overrides file for BOTH uat/prod (branch controls which version)
-          //******************************************
           "css/booking-overrides.css"
         ],
         js: [
           "js/booking-filter.js"
+          //"js/hs-banner.js"
         ]
       }
     };
