@@ -3,21 +3,11 @@
     //******************************************
     // CONFIG
     //******************************************
-    // jsDelivr format:
-    // https://cdn.jsdelivr.net/gh/USERNAME/REPO@BRANCH/path/to/file.ext
     var REPO = "cdircks-marg/Cendyn-UAT";
     var CDN  = "https://cdn.jsdelivr.net/gh/" + REPO + "@";
 
-    //******************************************
-    // 1 overrides file total (same file name for both modes)
-    // - PROD loads from @main branch
-    // - UAT loads from @uat branch
-    //******************************************
     var BRANCH_BY_MODE = { uat: "uat", prod: "main" };
 
-    //******************************************
-    // Domain-specific assets
-    //******************************************
     var DOMAIN_ASSETS = {
       "www.margaritavilleatsea.com": {
         css: [
@@ -45,23 +35,39 @@
     var SS_KEY = "uat_enabled_session";
     var LS_KEY = "uat_enabled_local";
 
-    //******************************************
-    // Optional prefixes for “UAT-owned” storage keys to clear on OFF
-    // Keep this tight.
-    //******************************************
     var UAT_STORAGE_PREFIXES = ["uat_", "UAT_", "cendyn_uat_", "CENDYN_UAT_"];
 
     //******************************************
-    // Badge (only in UAT)
+    // Badge
     //******************************************
     var BADGE_ID = "uat-toggle-badge";
-    var LOGO_SELECTOR = 'a.logo.property-no-own[href="/"]';
 
-    var obs = null;
+    // WWW logo selector (existing)
+    var WWW_HOST = "www.margaritavilleatsea.com";
+    var WWW_LOGO_SELECTOR = 'a.logo.property-no-own[href="/"]';
+
+    // Reservations logo target (your HTML block)
+    var RES_HOST = "reservations.margaritavilleatsea.com";
+    var RES_LOGO_IMG_SELECTOR = "div.MuiBox-root.css-0 a[href^='https://margaritavilleatsea.com/'] img.bp-logo";
+
+    //******************************************
+    // Observers
+    //******************************************
+    var obsWWW = null;
+    var obsRES = null;
 
     //******************************************
     // Helpers
     //******************************************
+    var DEBUG = true;
+    var log = function () { try { if (DEBUG && console && console.log) console.log.apply(console, arguments); } catch (e) {} };
+    var warn = function () { try { if (DEBUG && console && console.warn) console.warn.apply(console, arguments); } catch (e) {} };
+
+    var hostName = function () {
+      try { return (window.location.hostname || "").toLowerCase(); } catch (e) {}
+      return "";
+    };
+
     var getUatParam = function () {
       var params = new URLSearchParams(window.location.search);
       return (params.get("UAT") || params.get("uat") || "").toLowerCase();
@@ -85,10 +91,7 @@
       return BRANCH_BY_MODE[currentMode()] || "main";
     };
 
-    //******************************************
-    // FIX: currentRef() used by purge/cdnUrl
-    // For now, ref is just the current branch ("uat" or "main")
-    //******************************************
+    // FIX: currentRef used by purge/cdnUrl
     var currentRef = function () {
       return currentBranch();
     };
@@ -103,77 +106,6 @@
         }
       } catch (e) {}
       try { window.__UAT_MODE_CLEANUP__ = null; } catch (e) {}
-    };
-
-    //******************************************
-    // UAT-only jsDelivr purge (fire-and-forget)
-    // Uses image beacon to bypass CORS
-    //******************************************
-    var purgeJsDelivr = function (path) {
-      try {
-        if (currentMode() !== "uat") return;
-
-        var ref = currentRef();
-        var purgeUrl = "https://purge.jsdelivr.net/gh/" + REPO + "@" + ref + "/" + path;
-
-        var img = new Image();
-        img.src = purgeUrl + "?t=" + Date.now();
-
-        try { console.log("[UAT Loader] Purging:", purgeUrl); } catch (e) {}
-      } catch (e) {}
-    };
-
-    //******************************************
-    // CDN URL builder with UAT-only purge + cache bust
-    //******************************************
-    var cdnUrl = function (path) {
-      var ref = currentRef();
-      var baseUrl = CDN + encodeURIComponent(ref) + "/" + path;
-
-      if (currentMode() === "uat") {
-        // Purge first
-        purgeJsDelivr(path);
-
-        // Then force cache bust
-        return baseUrl + (baseUrl.indexOf("?") > -1 ? "&" : "?") + "v=" + Date.now();
-      }
-
-      return baseUrl;
-    };
-
-    //******************************************
-    // Debug logger (prints current mode + exact CSS/JS URLs being loaded)
-    //******************************************
-    var DEBUG = true; // flip to false to silence logs
-
-    var logAssetSummary = function (host, mode, branch, cssUrls, jsUrls) {
-      try {
-        if (!DEBUG || !window.console) return;
-
-        var title = "[UAT Loader] host=" + host + " mode=" + mode + " branch=" + branch;
-        try { console.groupCollapsed(title); } catch (e) { console.log(title); }
-
-        console.log("Param uat=", getUatParam());
-        console.log("Enabled=", isEnabled());
-
-        console.log("CSS (" + cssUrls.length + "):");
-        for (var i = 0; i < cssUrls.length; i++) console.log("  - " + cssUrls[i]);
-
-        console.log("JS (" + jsUrls.length + "):");
-        for (var j = 0; j < jsUrls.length; j++) console.log("  - " + jsUrls[j]);
-
-        // Show injected DOM tags
-        try {
-          var injectedCss = document.querySelectorAll("link[id^='mode-css-']");
-          var injectedJs  = document.querySelectorAll("script[id^='mode-js-']");
-          console.log("DOM injected CSS tags found:", injectedCss.length);
-          for (var c = 0; c < injectedCss.length; c++) console.log("  * " + injectedCss[c].id + " => " + (injectedCss[c].href || ""));
-          console.log("DOM injected JS tags found:", injectedJs.length);
-          for (var s = 0; s < injectedJs.length; s++) console.log("  * " + injectedJs[s].id + " => " + (injectedJs[s].src || ""));
-        } catch (e) {}
-
-        try { console.groupEnd(); } catch (e) {}
-      } catch (e) {}
     };
 
     //******************************************
@@ -211,6 +143,7 @@
           try { localStorage.setItem(LS_KEY, "1"); } catch (e) {}
         } else {
           runUatCleanupIfPresent();
+
           try { sessionStorage.removeItem(SS_KEY); } catch (e) {}
           try { localStorage.removeItem(LS_KEY); } catch (e) {}
 
@@ -221,9 +154,36 @@
     };
 
     //******************************************
+    // UAT-only jsDelivr purge (fire-and-forget)
+    //******************************************
+    var purgeJsDelivr = function (path) {
+      try {
+        if (currentMode() !== "uat") return;
+
+        var ref = currentRef();
+        var purgeUrl = "https://purge.jsdelivr.net/gh/" + REPO + "@" + ref + "/" + path;
+
+        var img = new Image();
+        img.src = purgeUrl + "?t=" + Date.now();
+      } catch (e) {}
+    };
+
+    //******************************************
+    // CDN URL builder with UAT-only purge + cache bust
+    //******************************************
+    var cdnUrl = function (path) {
+      var ref = currentRef();
+      var baseUrl = CDN + encodeURIComponent(ref) + "/" + path;
+
+      if (currentMode() === "uat") {
+        purgeJsDelivr(path);
+        return baseUrl + (baseUrl.indexOf("?") > -1 ? "&" : "?") + "v=" + Date.now();
+      }
+      return baseUrl;
+    };
+
+    //******************************************
     // Asset injection
-    // - We inject multiple CSS files and (optionally) JS files
-    // - IDs are deterministic so re-run swaps branch URLs cleanly
     //******************************************
     var ensureCss = function (id, href) {
       try {
@@ -236,18 +196,7 @@
         link.id = id;
         link.rel = "stylesheet";
         link.href = href;
-
-        // DEBUG
-        if (DEBUG) {
-          link.onload = function () { try { console.log("[UAT Loader] CSS loaded:", href); } catch (e) {} };
-          link.onerror = function (ev) { try { console.warn("[UAT Loader] CSS failed/blocked:", href, ev); } catch (e) {} };
-        }
-
         document.head.appendChild(link);
-
-        if (DEBUG) {
-          try { console.log("[UAT Loader] injected CSS:", href); } catch (e) {}
-        }
       } catch (e) {}
     };
 
@@ -267,152 +216,224 @@
         s.id = id;
         s.src = src;
         s.async = true;
-
-        // DEBUG
-        if (DEBUG) {
-          s.onload = function () { try { console.log("[UAT Loader] JS loaded:", src); } catch (e) {} };
-          s.onerror = function (ev) { try { console.warn("[UAT Loader] JS failed/blocked:", src, ev); } catch (e) {} };
-        }
-
         document.head.appendChild(s);
-
-        if (DEBUG) {
-          try { console.log("[UAT Loader] injected JS:", src); } catch (e) {}
-        }
       } catch (e) {}
     };
 
     var applyDomainAssets = function () {
       try {
-        var host = (window.location.hostname || "").toLowerCase();
+        var host = hostName();
         var cfg = DOMAIN_ASSETS[host];
+        if (!cfg) return;
 
-        // If not one of the supported hosts, do nothing (safe)
-        if (!cfg) {
-          try { console.warn("[UAT Loader] No DOMAIN_ASSETS match for host:", host); } catch (e) {}
-          return;
-        }
-
-        var mode = currentMode();
-        var branch = currentBranch();
-
-        // Build URLs (for logging + injection)
         var css = cfg.css || [];
-        var js  = cfg.js || [];
-
-        var cssUrls = [];
-        for (var i = 0; i < css.length; i++) cssUrls.push(cdnUrl(css[i]));
-
-        var jsUrls = [];
-        for (var j = 0; j < js.length; j++) jsUrls.push(cdnUrl(js[j]));
-
-        // CSS inject
-        for (var ci = 0; ci < css.length; ci++) {
-          var id = "mode-css-" + ci + "-" + css[ci].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-          ensureCss(id, cssUrls[ci]);
+        for (var i = 0; i < css.length; i++) {
+          var id = "mode-css-" + i + "-" + css[i].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+          ensureCss(id, cdnUrl(css[i]));
         }
 
-        // JS inject
-        for (var ji = 0; ji < js.length; ji++) {
-          var jid = "mode-js-" + ji + "-" + js[ji].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-          ensureJs(jid, jsUrls[ji]);
+        var js = cfg.js || [];
+        for (var j = 0; j < js.length; j++) {
+          var jid = "mode-js-" + j + "-" + js[j].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+          ensureJs(jid, cdnUrl(js[j]));
         }
-
-        // Log summary
-        logAssetSummary(host, mode, branch, cssUrls, jsUrls);
-
-        // Tell downstream scripts which mode is active
-        try {
-          window.dispatchEvent(new CustomEvent("uat:mode", { detail: { mode: mode, host: host } }));
-        } catch (e) {}
       } catch (e) {}
     };
 
     //******************************************
-    // Badge (ONLY when UAT enabled)
+    // Reservations-only: ensure logo outbound link keeps uat=on when enabled
+    // (because reservations removes uat param from its own URL)
+    //******************************************
+    var getReservationsLogoAnchor = function () {
+      try {
+        var img = document.querySelector(RES_LOGO_IMG_SELECTOR);
+        if (!img) return null;
+        return img.closest("a") || null;
+      } catch (e) {}
+      return null;
+    };
+
+    var patchReservationsLogoLinkIfEnabled = function () {
+      try {
+        if (hostName() !== RES_HOST) return;
+
+        // If param shows up briefly, persist immediately
+        var p = getUatParam();
+        if (p === "on") setEnabled(true);
+        if (p === "off") setEnabled(false);
+
+        if (!isEnabled()) return;
+
+        var a = getReservationsLogoAnchor();
+        if (!a) return;
+
+        var href = a.getAttribute("href") || "";
+        if (!href) return;
+
+        var u = new URL(href, window.location.origin);
+
+        if ((u.searchParams.get("uat") || "").toLowerCase() !== "on") {
+          u.searchParams.set("uat", "on");
+          a.setAttribute("href", u.toString());
+        }
+      } catch (e) {}
+    };
+
+    var unpatchReservationsLogoLink = function () {
+      try {
+        if (hostName() !== RES_HOST) return;
+        var a = getReservationsLogoAnchor();
+        if (!a) return;
+
+        var href = a.getAttribute("href") || "";
+        if (!href) return;
+
+        var u = new URL(href, window.location.origin);
+        u.searchParams.delete("uat");
+        u.searchParams.delete("UAT");
+        a.setAttribute("href", u.toString());
+      } catch (e) {}
+    };
+
+    //******************************************
+    // Badge helpers
     //******************************************
     var removeBadge = function () {
-      var b = document.getElementById(BADGE_ID);
-      if (b && b.parentNode) b.parentNode.removeChild(b);
+      try {
+        var b = document.getElementById(BADGE_ID);
+        if (b && b.parentNode) b.parentNode.removeChild(b);
+      } catch (e) {}
+    };
+
+    var getBadgeInsertTarget = function () {
+      try {
+        var host = hostName();
+
+        // WWW: insert after main logo
+        if (host === WWW_HOST) {
+          return document.querySelector(WWW_LOGO_SELECTOR) || null;
+        }
+
+        // RES: insert after the reservations logo anchor (your block)
+        if (host === RES_HOST) {
+          return getReservationsLogoAnchor();
+        }
+      } catch (e) {}
+      return null;
     };
 
     var injectBadgeIfEnabled = function () {
-      if (!isEnabled()) {
-        removeBadge();
-        return;
-      }
-      if (document.getElementById(BADGE_ID)) return;
-
-      // Only show on www.margaritavilleatsea.com (safe)
-      var host = (window.location.hostname || "").toLowerCase();
-      if (host !== "www.margaritavilleatsea.com") return;
-
-      var logo = document.querySelector(LOGO_SELECTOR);
-      if (!logo) return;
-
-      var wrap = document.createElement("div");
-      wrap.id = BADGE_ID;
-      wrap.style.marginTop = "56px";
-      wrap.style.display = "inline-flex";
-      wrap.style.alignItems = "center";
-      wrap.style.gap = "8px";
-      wrap.style.position = "fixed";
-      wrap.style.zIndex = "10000000";
-
-      var pill = document.createElement("span");
-      pill.textContent = "UAT MODE";
-      pill.style.padding = "4px 10px";
-      pill.style.borderRadius = "999px";
-      pill.style.background = "#C8102E";
-      pill.style.color = "#fff";
-      pill.style.fontWeight = "800";
-      pill.style.fontSize = "12px";
-      pill.style.lineHeight = "1";
-
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = "SWITCH TO PROD";
-      btn.style.cursor = "pointer";
-      btn.style.padding = "4px 10px";
-      btn.style.borderRadius = "999px";
-      btn.style.border = "1px solid #C8102E";
-      btn.style.background = "#fff";
-      btn.style.color = "#C8102E";
-      btn.style.fontWeight = "800";
-      btn.style.fontSize = "12px";
-      btn.style.lineHeight = "1";
-
-      btn.addEventListener("click", function () {
-        try {
-          setEnabled(false);
-
-          // swap assets (loads @main versions)
-          applyDomainAssets();
-
+      try {
+        if (!isEnabled()) {
           removeBadge();
+          return;
+        }
 
-          // remove URL param (no reload)
-          var url = new URL(window.location.href);
-          url.searchParams.delete("UAT");
-          url.searchParams.delete("uat");
-          window.history.replaceState({}, "", url.toString());
-        } catch (e) {}
-      });
+        if (document.getElementById(BADGE_ID)) return;
 
-      wrap.appendChild(pill);
-      wrap.appendChild(btn);
-      logo.insertAdjacentElement("afterend", wrap);
+        var target = getBadgeInsertTarget();
+        if (!target) return;
+
+        var wrap = document.createElement("div");
+        wrap.id = BADGE_ID;
+        wrap.style.marginTop = "8px";
+        wrap.style.display = "inline-flex";
+        wrap.style.alignItems = "center";
+        wrap.style.gap = "8px";
+        wrap.style.position = "relative";
+        wrap.style.zIndex = "10000000";
+
+        // Reservations header layout is different; make it visible and stable
+        if (hostName() === RES_HOST) {
+          wrap.style.position = "relative";
+          wrap.style.display = "flex";
+        }
+
+        var pill = document.createElement("span");
+        pill.textContent = "UAT MODE";
+        pill.style.padding = "4px 10px";
+        pill.style.borderRadius = "999px";
+        pill.style.background = "#C8102E";
+        pill.style.color = "#fff";
+        pill.style.fontWeight = "800";
+        pill.style.fontSize = "12px";
+        pill.style.lineHeight = "1";
+
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = "SWITCH TO PROD";
+        btn.style.cursor = "pointer";
+        btn.style.padding = "4px 10px";
+        btn.style.borderRadius = "999px";
+        btn.style.border = "1px solid #C8102E";
+        btn.style.background = "#fff";
+        btn.style.color = "#C8102E";
+        btn.style.fontWeight = "800";
+        btn.style.fontSize = "12px";
+        btn.style.lineHeight = "1";
+
+        btn.addEventListener("click", function () {
+          try {
+            // Turn off UAT + cleanup
+            setEnabled(false);
+
+            // Remove badge immediately
+            removeBadge();
+
+            // Reservations: remove uat=on from the outbound logo link too
+            unpatchReservationsLogoLink();
+
+            // Swap assets to PROD
+            applyDomainAssets();
+
+            // Remove URL param (no reload) if present
+            var url = new URL(window.location.href);
+            url.searchParams.delete("UAT");
+            url.searchParams.delete("uat");
+            window.history.replaceState({}, "", url.toString());
+          } catch (e) {}
+        });
+
+        wrap.appendChild(pill);
+        wrap.appendChild(btn);
+
+        // Insert directly under the logo
+        try { target.insertAdjacentElement("afterend", wrap); } catch (e) {}
+      } catch (e) {}
     };
 
-    var startObserver = function () {
-      if (obs) return;
-      var root = document.querySelector("#header") || document.documentElement;
+    //******************************************
+    // Observers
+    //******************************************
+    var startWWWObserver = function () {
+      try {
+        if (obsWWW) return;
+        if (hostName() !== WWW_HOST) return;
 
-      obs = new MutationObserver(function () {
-        injectBadgeIfEnabled();
-      });
+        var root = document.querySelector("#header") || document.documentElement;
+        obsWWW = new MutationObserver(function () {
+          injectBadgeIfEnabled();
+        });
+        obsWWW.observe(root, { childList: true, subtree: true });
+      } catch (e) {}
+    };
 
-      obs.observe(root, { childList: true, subtree: true });
+    var startRESObserver = function () {
+      try {
+        if (obsRES) return;
+        if (hostName() !== RES_HOST) return;
+
+        var root = document.body || document.documentElement;
+        if (!root) return;
+
+        obsRES = new MutationObserver(function () {
+          // Keep link patched and badge visible on re-renders
+          patchReservationsLogoLinkIfEnabled();
+          injectBadgeIfEnabled();
+        });
+
+        obsRES.observe(root, { childList: true, subtree: true });
+      } catch (e) {}
     };
 
     //******************************************
@@ -464,13 +485,20 @@
       if (p === "off") setEnabled(false);
 
       applyDomainAssets();
+
+      // Reservations: keep UAT alive even if param disappears + patch outbound link
+      patchReservationsLogoLinkIfEnabled();
+
+      // Badge: show on BOTH www + reservations
       injectBadgeIfEnabled();
     });
 
     // Initial run
     applyDomainAssets();
+    patchReservationsLogoLinkIfEnabled();
     injectBadgeIfEnabled();
-    startObserver();
+    startWWWObserver();
+    startRESObserver();
 
   } catch (e) {}
 })();
