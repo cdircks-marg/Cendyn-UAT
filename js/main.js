@@ -85,8 +85,12 @@
       return BRANCH_BY_MODE[currentMode()] || "main";
     };
 
-    var cdnUrl = function (path) {
-      return CDN + encodeURIComponent(currentBranch()) + "/" + path;
+    //******************************************
+    // FIX: currentRef() used by purge/cdnUrl
+    // For now, ref is just the current branch ("uat" or "main")
+    //******************************************
+    var currentRef = function () {
+      return currentBranch();
     };
 
     //******************************************
@@ -101,6 +105,80 @@
       try { window.__UAT_MODE_CLEANUP__ = null; } catch (e) {}
     };
 
+    //******************************************
+    // UAT-only jsDelivr purge (fire-and-forget)
+    // Uses image beacon to bypass CORS
+    //******************************************
+    var purgeJsDelivr = function (path) {
+      try {
+        if (currentMode() !== "uat") return;
+
+        var ref = currentRef();
+        var purgeUrl = "https://purge.jsdelivr.net/gh/" + REPO + "@" + ref + "/" + path;
+
+        var img = new Image();
+        img.src = purgeUrl + "?t=" + Date.now();
+
+        try { console.log("[UAT Loader] Purging:", purgeUrl); } catch (e) {}
+      } catch (e) {}
+    };
+
+    //******************************************
+    // CDN URL builder with UAT-only purge + cache bust
+    //******************************************
+    var cdnUrl = function (path) {
+      var ref = currentRef();
+      var baseUrl = CDN + encodeURIComponent(ref) + "/" + path;
+
+      if (currentMode() === "uat") {
+        // Purge first
+        purgeJsDelivr(path);
+
+        // Then force cache bust
+        return baseUrl + (baseUrl.indexOf("?") > -1 ? "&" : "?") + "v=" + Date.now();
+      }
+
+      return baseUrl;
+    };
+
+    //******************************************
+    // Debug logger (prints current mode + exact CSS/JS URLs being loaded)
+    //******************************************
+    var DEBUG = true; // flip to false to silence logs
+
+    var logAssetSummary = function (host, mode, branch, cssUrls, jsUrls) {
+      try {
+        if (!DEBUG || !window.console) return;
+
+        var title = "[UAT Loader] host=" + host + " mode=" + mode + " branch=" + branch;
+        try { console.groupCollapsed(title); } catch (e) { console.log(title); }
+
+        console.log("Param uat=", getUatParam());
+        console.log("Enabled=", isEnabled());
+
+        console.log("CSS (" + cssUrls.length + "):");
+        for (var i = 0; i < cssUrls.length; i++) console.log("  - " + cssUrls[i]);
+
+        console.log("JS (" + jsUrls.length + "):");
+        for (var j = 0; j < jsUrls.length; j++) console.log("  - " + jsUrls[j]);
+
+        // Show injected DOM tags
+        try {
+          var injectedCss = document.querySelectorAll("link[id^='mode-css-']");
+          var injectedJs  = document.querySelectorAll("script[id^='mode-js-']");
+          console.log("DOM injected CSS tags found:", injectedCss.length);
+          for (var c = 0; c < injectedCss.length; c++) console.log("  * " + injectedCss[c].id + " => " + (injectedCss[c].href || ""));
+          console.log("DOM injected JS tags found:", injectedJs.length);
+          for (var s = 0; s < injectedJs.length; s++) console.log("  * " + injectedJs[s].id + " => " + (injectedJs[s].src || ""));
+        } catch (e) {}
+
+        try { console.groupEnd(); } catch (e) {}
+      } catch (e) {}
+    };
+
+    //******************************************
+    // Targeted storage clearing helpers
+    //******************************************
     var clearStorageByPrefixes = function (storage, prefixes) {
       try {
         if (!storage || !prefixes || !prefixes.length) return;
@@ -158,7 +236,18 @@
         link.id = id;
         link.rel = "stylesheet";
         link.href = href;
+
+        // DEBUG
+        if (DEBUG) {
+          link.onload = function () { try { console.log("[UAT Loader] CSS loaded:", href); } catch (e) {} };
+          link.onerror = function (ev) { try { console.warn("[UAT Loader] CSS failed/blocked:", href, ev); } catch (e) {} };
+        }
+
         document.head.appendChild(link);
+
+        if (DEBUG) {
+          try { console.log("[UAT Loader] injected CSS:", href); } catch (e) {}
+        }
       } catch (e) {}
     };
 
@@ -167,7 +256,7 @@
         var el = document.getElementById(id);
         if (el && el.getAttribute("src") === src) return;
 
-        // If removing a prior UAT-owned script, run cleanup first
+        // If removing a prior script, run cleanup first
         if (el) {
           try { runUatCleanupIfPresent(); } catch (e) {}
         }
@@ -178,7 +267,18 @@
         s.id = id;
         s.src = src;
         s.async = true;
+
+        // DEBUG
+        if (DEBUG) {
+          s.onload = function () { try { console.log("[UAT Loader] JS loaded:", src); } catch (e) {} };
+          s.onerror = function (ev) { try { console.warn("[UAT Loader] JS failed/blocked:", src, ev); } catch (e) {} };
+        }
+
         document.head.appendChild(s);
+
+        if (DEBUG) {
+          try { console.log("[UAT Loader] injected JS:", src); } catch (e) {}
+        }
       } catch (e) {}
     };
 
@@ -188,30 +288,42 @@
         var cfg = DOMAIN_ASSETS[host];
 
         // If not one of the supported hosts, do nothing (safe)
-        if (!cfg) return;
+        if (!cfg) {
+          try { console.warn("[UAT Loader] No DOMAIN_ASSETS match for host:", host); } catch (e) {}
+          return;
+        }
 
-        // CSS
+        var mode = currentMode();
+        var branch = currentBranch();
+
+        // Build URLs (for logging + injection)
         var css = cfg.css || [];
-        for (var i = 0; i < css.length; i++) {
-          //******************************************
-          // deterministic id, based on index + filename
-          //******************************************
-          var id = "mode-css-" + i + "-" + css[i].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-          ensureCss(id, cdnUrl(css[i]));
+        var js  = cfg.js || [];
+
+        var cssUrls = [];
+        for (var i = 0; i < css.length; i++) cssUrls.push(cdnUrl(css[i]));
+
+        var jsUrls = [];
+        for (var j = 0; j < js.length; j++) jsUrls.push(cdnUrl(js[j]));
+
+        // CSS inject
+        for (var ci = 0; ci < css.length; ci++) {
+          var id = "mode-css-" + ci + "-" + css[ci].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+          ensureCss(id, cssUrls[ci]);
         }
 
-        // JS
-        var js = cfg.js || [];
-        for (var j = 0; j < js.length; j++) {
-          var jid = "mode-js-" + j + "-" + js[j].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-          ensureJs(jid, cdnUrl(js[j]));
+        // JS inject
+        for (var ji = 0; ji < js.length; ji++) {
+          var jid = "mode-js-" + ji + "-" + js[ji].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+          ensureJs(jid, jsUrls[ji]);
         }
 
-        //******************************************
+        // Log summary
+        logAssetSummary(host, mode, branch, cssUrls, jsUrls);
+
         // Tell downstream scripts which mode is active
-        //******************************************
         try {
-          window.dispatchEvent(new CustomEvent("uat:mode", { detail: { mode: currentMode(), host: host } }));
+          window.dispatchEvent(new CustomEvent("uat:mode", { detail: { mode: mode, host: host } }));
         } catch (e) {}
       } catch (e) {}
     };
@@ -337,9 +449,7 @@
     if (p0 === "on") setEnabled(true);
     if (p0 === "off") setEnabled(false);
 
-    //******************************************
     // If no param, honor persisted localStorage and restore session for this tab
-    //******************************************
     try {
       if (!p0 && isEnabled()) {
         try { sessionStorage.setItem(SS_KEY, "1"); } catch (e) {}
