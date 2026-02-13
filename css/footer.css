@@ -1,0 +1,16 @@
+@media only screen and (max-width: 767px) {
+  html body .footer .footer-menu ul li {
+    width: 100%;
+  }
+  html body .footer .footer-menu {
+    background: white;
+  }
+}
+
+html body .footer .footer-top-bar {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 20px 30px 20px;
+  background: white;
+  padding-top: 25px;
+}
